@@ -2,7 +2,11 @@
  * Wall-clock time: the RTC in UTC plus a stored offset.
  */
 
+/* gmtime_r, for the simulator's host C library. */
+#define _POSIX_C_SOURCE 200809L
+
 #include <stdlib.h>
+#include <time.h>
 
 #include <zephyr/device.h>
 #include <zephyr/drivers/rtc.h>
@@ -12,7 +16,9 @@
 #include <zephyr/shell/shell.h>
 #include <zephyr/sys/timeutil.h>
 
+#include "alarm.h"
 #include "clock.h"
+#include "ui.h"
 
 LOG_MODULE_REGISTER(clock, LOG_LEVEL_INF);
 
@@ -79,6 +85,8 @@ static int cmd_clock(const struct shell *sh, size_t argc, char **argv)
 		}
 		tz_min = atoi(argv[3]);
 		settings_save_one("una/tz_min", &tz_min, sizeof(tz_min));
+		alarm_clock_changed();
+		ui_refresh();
 	} else if (argc != 1) {
 		shell_error(sh, "usage: clock [set <seconds since 1970 UTC> <offset minutes>]");
 		return -EINVAL;

@@ -5,12 +5,30 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(una_zephyr)
 
 target_sources(app PRIVATE
-  src/bluetooth.c
+  src/alarm.c
+  src/alert.c
   src/clock.c
+  src/face.c
   src/main.c
-  src/power.c
+  src/menu.c
   src/screenshot.c
-  src/storage.c
-  src/usb.c
-  src/watchdog.c
+  src/settings.c
+  src/status.c
+  src/stopwatch.c
+  src/timer.c
+  src/ui.c
 )
+
+# The hardware, or the simulator's stand-ins for it (-b native_sim/native/64).
+if(CONFIG_BOARD_UNA_WATCH)
+  target_sources(app PRIVATE
+    src/alert_hw.c
+    src/bluetooth.c
+    src/power.c
+    src/storage.c
+    src/usb.c
+    src/watchdog.c
+  )
+else()
+  target_sources(app PRIVATE src/sim.c)
+endif()

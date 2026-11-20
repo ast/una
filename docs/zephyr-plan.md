@@ -82,6 +82,29 @@ layer) before the UI is designed around it.
 - Charging and USB-attach handling (STUSB4500 alert, NX20P0407 fault).
 - Shell: `power off|status`, `battery`.
 
+**Open: idle current (deferred, usability features come first).** Measured
+at v0.1.0 over 7 h on the wrist: 0.84 mA with the backlight off, 1.1 mA
+overall, so about a week on the 200 mAh cell. The target above is about
+160 uA. The CPU is awake under 0.1 % of the time, so this is a standing draw
+during Stop, not CPU time. To do, time-boxed to a day or two:
+- A shell switch per suspect, so each can be turned off on a running watch.
+- Measure each for 20-30 minutes on battery; the gauge needs that long to
+  resolve about 0.1 mA.
+- Suspects, none checked yet: eMMC powered between the once-a-minute syncs;
+  sensors and the GPS chip left in their default state; PMIC mode and
+  regulators during Stop; whatever wakes the CPU twice a second (about 120
+  Stop entries a minute when idle).
+
+### Status after v0.1.0 (20 Nov 2026)
+
+Done ahead of the phases below, to make the watch usable: named buttons with
+long-press, a screen stack with menu and settings, stopwatch, timer, one
+daily alarm, buzzer and vibration motor (register-level, in the app), and the
+`native_sim` build with `una-z sim`. It is flashed and the screens work on
+the watch; that the buzzer and motor are heard and felt is still to be
+confirmed. Next: Bluetooth time and notifications through Gadgetbridge
+(phase 5).
+
 ### 2. Board services
 - RTC time in UTC with time zone; `date` shell command.
 - Buttons: SW1-SW4 named UP/SELECT/DOWN/BACK as stock, long-press and hold

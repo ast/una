@@ -1,0 +1,35 @@
+/*
+ * The simulator: the watch's 240x240 screen in the SDL display, the
+ * backlight on an emulated pin, the same button codes as the watch.
+ */
+
+#include <zephyr/dt-bindings/display/panel.h>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+
+/ {
+	aliases {
+		backlight = &backlight;
+	};
+
+	leds {
+		backlight: backlight {
+			label = "Backlight";
+			gpios = <&gpio0 1 GPIO_ACTIVE_HIGH>;
+		};
+	};
+
+	/* As in una_watch.dts. There are no buttons: "input report" presses them. */
+	longpress {
+		compatible = "zephyr,input-longpress";
+		input-codes = <INPUT_KEY_1 INPUT_KEY_2 INPUT_KEY_3 INPUT_KEY_4>;
+		short-codes = <INPUT_KEY_A INPUT_KEY_B INPUT_KEY_C INPUT_KEY_D>;
+		long-codes = <INPUT_KEY_W INPUT_KEY_X INPUT_KEY_Y INPUT_KEY_Z>;
+		long-delay-ms = <700>;
+	};
+};
+
+&sdl_dc {
+	pixel-format = <PANEL_PIXEL_FORMAT_RGB_565>;
+	width = <240>;
+	height = <240>;
+};

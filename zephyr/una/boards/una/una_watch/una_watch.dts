@@ -9,6 +9,7 @@
 #include <st/u5/stm32u5a5Xj.dtsi>
 #include <st/u5/stm32u5a5qjixq-pinctrl.dtsi>
 #include <zephyr/dt-bindings/input/input-event-codes.h>
+#include <zephyr/dt-bindings/pwm/pwm.h>
 
 / {
 	model = "UNA Watch";
@@ -67,6 +68,19 @@
 		};
 	};
 
+	/*
+	 * A-D when a button is released early, W-Z once it has been held, in
+	 * the order UP (SW1), SELECT (SW2), DOWN (SW3), BACK (SW4). No input
+	 * device is named, so presses simulated from the shell count too.
+	 */
+	longpress {
+		compatible = "zephyr,input-longpress";
+		input-codes = <INPUT_KEY_1 INPUT_KEY_2 INPUT_KEY_3 INPUT_KEY_4>;
+		short-codes = <INPUT_KEY_A INPUT_KEY_B INPUT_KEY_C INPUT_KEY_D>;
+		long-codes = <INPUT_KEY_W INPUT_KEY_X INPUT_KEY_Y INPUT_KEY_Z>;
+		long-delay-ms = <700>;
+	};
+
 	lcd: lcd {
 		compatible = "sharp,ls012b7dd06a";
 		width = <240>;
@@ -97,6 +111,16 @@
 		disk-name = "USER";
 		parent-disk = "MMC";
 		start-sector = <614400>;
+	};
+
+	/* Buzzer and vibration motor, driven by the app's src/alert_hw.c. */
+	zephyr,user {
+		/* 4 kHz, the stock firmware's default pitch. */
+		pwms = <&buzzer_pwm 3 PWM_USEC(250) PWM_POLARITY_NORMAL>;
+		/* BUZZER_EN1 and BUZZER_EN2: together they set the level. */
+		buzzer-en-gpios = <&gpiob 9 GPIO_ACTIVE_HIGH>, <&gpiod 5 GPIO_ACTIVE_HIGH>;
+		/* DRV2625 NRST: low is shutdown. */
+		haptic-enable-gpios = <&gpiof 2 GPIO_ACTIVE_HIGH>;
 	};
 
 	leds {
@@ -273,14 +297,6 @@ zephyr_udc0: &usbotg_hs {
  * Power enables of parts nothing drives yet, held off as the stock kernel
  * boots them. Left floating, the GNSS module's own pull-up turns it on.
  */
-&gpiod {
-	buzzer-en2-hog {
-		gpio-hog;
-		gpios = <5 GPIO_ACTIVE_HIGH>;
-		output-low;
-	};
-};
-
 &gpiog {
 	altimeter-en-hog {
 		gpio-hog;
@@ -302,12 +318,6 @@ zephyr_udc0: &usbotg_hs {
 };
 
 &gpiof {
-	haptic-rst-hog {
-		gpio-hog;
-		gpios = <2 GPIO_ACTIVE_HIGH>;
-		output-low;
-	};
-
 	ppg-en-hog {
 		gpio-hog;
 		gpios = <13 GPIO_ACTIVE_HIGH>;
@@ -316,12 +326,6 @@ zephyr_udc0: &usbotg_hs {
 };
 
 &gpiob {
-	buzzer-en1-hog {
-		gpio-hog;
-		gpios = <9 GPIO_ACTIVE_HIGH>;
-		output-low;
-	};
-
 	/* USB_DAM: high hides USB when a debug accessory is attached. */
 	usb-dam-hog {
 		gpio-hog;
@@ -343,6 +347,17 @@ zephyr_udc0: &usbotg_hs {
 	clk-div = <1>;
 	disk-name = "MMC";
 	status = "okay";
+};
+
+&timers4 {
+	st,prescaler = <0>;
+	status = "okay";
+
+	buzzer_pwm: pwm {
+		pinctrl-0 = <&tim4_ch3_pb8>;
+		pinctrl-names = "default";
+		status = "okay";
+	};
 };
 
 &clk_hsi48 {

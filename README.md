@@ -1,6 +1,21 @@
 # UNA Watch development
 
-Workspace for writing apps (LVGL) and building firmware for the UNA Watch.
+Workspace for writing apps (LVGL) and building firmware for the UNA Watch,
+including an own firmware on Zephyr, shown here (see [Zephyr](#zephyr)):
+
+<p>
+<img src="docs/images/face.png" width="160" alt="Watch face">
+<img src="docs/images/menu.png" width="160" alt="Menu">
+<img src="docs/images/stopwatch.png" width="160" alt="Stopwatch">
+<img src="docs/images/timer.png" width="160" alt="Timer">
+<img src="docs/images/alarm.png" width="160" alt="Alarm">
+<img src="docs/images/battery.png" width="160" alt="Battery">
+<img src="docs/images/settings.png" width="160" alt="Settings">
+<img src="docs/images/ring.png" width="160" alt="An alert ringing">
+</p>
+
+Screenshots of the Zephyr firmware from its simulator, taken with `una-z -s
+shot`; the watch draws the same screens.
 
 - `refs/` — upstream clones, not tracked: `una-sdk`, `una-kernel-public`, `una-hardware`
 - `docs/` — datasheets and hardware notes, see [docs/README.md](docs/README.md)
@@ -114,8 +129,24 @@ version, including older ones.
 ## Zephyr
 
 `zephyr/una/` holds the west manifest, the `una_watch` board, the display
-driver and the app. The stock bootloader stays in place and starts MCUboot at
-0x08060000, which starts the app:
+driver and the app. What it does so far:
+
+- Watch face with time, date, battery and the alarm time; stopwatch, countdown
+  timer and one daily alarm, which ring with the buzzer and the vibration
+  motor; battery screen; settings (backlight time, sound, vibration, power
+  off).
+- Battery gauge and charger status, power-off, Stop mode whenever idle and off
+  USB: about 0.85 mA idle, a week on a charge (measured at v0.1.0).
+- Clock from the RTC with a stored UTC offset, set from the computer.
+- Log files on the eMMC with a telemetry line a minute.
+- Firmware update over USB with automatic rollback; a simulator.
+- Not yet: Bluetooth (the radio chip is held in reset), sensors, GPS. The plan
+  is [docs/zephyr-plan.md](docs/zephyr-plan.md).
+
+The version is in `zephyr/una/app/VERSION` and shown under Settings, About.
+
+The stock bootloader stays in place and starts MCUboot at 0x08060000, which
+starts the app:
 
 | Flash | Contents |
 |---|---|
@@ -123,7 +154,7 @@ driver and the app. The stock bootloader stays in place and starts MCUboot at
 | 0x08060000, 128 KB | MCUboot |
 | 0x08080000, 1536 KB | slot 0, the running image |
 | 0x08200000, 1536 KB | slot 1, where an upload lands |
-| 0x08380000, 512 KB | storage, unused so far |
+| 0x08380000, 512 KB | settings (UTC offset, alarm, backlight time, ...) |
 
 ```sh
 west init -l zephyr/una && (cd zephyr && west update --narrow -o=--depth=1)   # once
@@ -137,11 +168,65 @@ west build -d build/zephyr && una-z flash   # ~30 s: upload, test boot, confirm
 una-z sh kernel uptime                      # any shell command
 una-z shot                                  # screenshot -> build/shot.png
 una-z press 3                               # press SW3 (SW1-SW4, see the board dts)
+una-z press 4 1000                          # hold SW4 for a second
 una-z log 10                                # watch log messages for 10 s
 una-z logs                                  # copy the log files off the eMMC -> logs/
 una-z time                                  # set the watch's clock from this computer
 una-z reset                                 # reboot through mcumgr
 ```
+
+`una-z flash` boots the new image once as a test and confirms it when its shell
+answers. An image that crashes, hangs (8 s watchdog) or is never confirmed is
+swapped back for the previous one at the next reset.
+
+The watch is two USB serial ports, `2fe3:0004` "UNA Watch Zephyr": interface 0
+is the shell, interface 2 is mcumgr. `/dev/una-watch` does not point at either.
+
+If `una-z flash` is interrupted before it has confirmed, the new image keeps
+running unconfirmed and the next upload fails. `una-z sh mcuboot` shows that
+state (`confirmed: 0`); `una-z sh mcuboot confirm` keeps the image, a reset
+puts the previous one back.
+
+### Simulator
+
+The same app builds as a Linux program (Zephyr's `native_sim`): the UI, the
+shell, settings, the clock, alarms and timers run as on the watch, with the
+screen in SDL. What is hardware on the watch (battery, buzzer, motor) is
+stood in for by `src/sim.c` and set or read with the `sim` shell command.
+Power, USB, storage and Bluetooth are not in it.
+
+```sh
+west build -b native_sim/native/64 -d build/sim zephyr/una/app   # once; then west build -d build/sim
+una-z sim                    # start it (again), no window; sets its clock
+una-z sim --window           # the same with the screen in a window
+una-z -s shot                # as on the watch -> build/sim-shot.png
+una-z -s press 2
+una-z -s sh sim battery 15 0 # 15 %, no USB power
+una-z -s sh sim state        # buzzer, motor, power-off asked for
+una-z sim stop
+```
+
+`prj.conf` is what both builds share; `boards/una_watch.conf` and
+`boards/native_sim_native_64.conf` are added for each. Settings are kept in
+`build/sim/flash.bin`.
+
+### Buttons and screens
+
+| Button | Stock name | Does |
+|---|---|---|
+| SW1, top left | UP | previous row, more |
+| SW2, top right (power) | SELECT | open, start/stop, next field |
+| SW3, bottom left | DOWN | next row, less, reset |
+| SW4, bottom right | BACK | back; held: watch face |
+
+From the face, SELECT opens the menu (stopwatch, timer, alarm, battery,
+settings) and UP or DOWN shows the battery. A press is acted on at release;
+"held" is 0.7 s. Timer and alarm ring with the buzzer and the motor (`alert
+ring` in the shell does the same) until any button is pressed.
+
+A screen is a `struct ui_screen` (`src/ui.h`): `enter` builds its widgets,
+`update` refreshes them and says when it is next due, `key` gets the buttons.
+The main thread sleeps between those, so an idle screen costs nothing.
 
 ### Telemetry
 
@@ -166,13 +251,6 @@ Wear: a line is about 120 bytes, so about 170 KB a day, and each line costs
 one sync of a few 4 KB blocks. Even at 1 MB of flash writes per sync that is
 1.4 GB a day against roughly 12 TB of endurance (4 GB at 3000 cycles): decades.
 
-`una-z flash` boots the new image once as a test and confirms it when its shell
-answers. An image that crashes, hangs (8 s watchdog) or is never confirmed is
-swapped back for the previous one at the next reset.
-
-The watch is two USB serial ports, `2fe3:0004` "UNA Watch Zephyr": interface 0
-is the shell, interface 2 is mcumgr. `/dev/una-watch` does not point at either.
-
 ### When the app does not come up
 
 - **MCUboot recovery:** hold SW1 (top-left) through a reset. The screen keeps
@@ -183,7 +261,7 @@ is the shell, interface 2 is mcumgr. `/dev/una-watch` does not point at either.
   20 s; the PMIC power-cycles the watch. Keep holding for the UNA bootloader
   menu, release for a normal start.
 - **First install, or MCUboot itself is broken:** pack MCUboot and the app into
-  one `.ota` and install it like a kernel (below). `firmware/zephyr-<version>/`
+  one `.ota` and install it like a kernel (above). `firmware/zephyr-<version>/`
   keeps one that is known to work.
 
 ```sh

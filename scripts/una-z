@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Drive the UNA Watch running Zephyr over USB.
+"""Drive the UNA Watch running Zephyr over USB, or the simulator.
 
   una-z sh [-t SECONDS] COMMAND...
                              run a shell command, print its output
@@ -14,6 +14,11 @@
   una-z time                 set the watch's clock and UTC offset from this computer
   una-z wait                 wait until the shell answers
   una-z reset                reboot through mcumgr (works when the shell is stuck)
+
+  una-z sim [--window]       start the simulator (build/sim, see the README), again
+                             if it is running; --window shows its screen
+  una-z sim stop
+  una-z -s COMMAND...        sh, shot, press, log, time and wait, on the simulator
 
 The first USB serial port is the shell, the second is mcumgr.
 """
@@ -32,7 +37,16 @@ PROMPT = "una:~$ "
 SIGNED = os.path.join(ROOT, "build/zephyr/app/zephyr/zephyr.signed.bin")
 
 
+SIM = False
+SIM_DIR = os.path.join(ROOT, "build/sim")
+
+
 def port(interface):
+    if SIM:
+        try:
+            return open(os.path.join(SIM_DIR, "pty")).read().strip() if interface == 0 else None
+        except OSError:
+            return None
     found = glob.glob(f"/dev/serial/by-id/usb-UNA_UNA_Watch_Zephyr_*-if{interface:02d}")
     return found[0] if found else None
 
@@ -41,7 +55,8 @@ def shell(command, timeout=5.0):
     """Send one line to the shell and return what it prints before the next prompt."""
     path = port(0)
     if not path:
-        raise OSError("watch not found (is Zephyr running and the cable in?)")
+        raise OSError("simulator not running (una-z sim)" if SIM else
+                      "watch not found (is Zephyr running and the cable in?)")
     fd = os.open(path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
     try:
         attr = termios.tcgetattr(fd)
@@ -180,16 +195,80 @@ def logs(dest):
         print(os.path.join(dest, name), os.path.getsize(os.path.join(dest, name)), "bytes")
 
 
+def sim_stop():
+    try:
+        pid = int(open(os.path.join(SIM_DIR, "pid")).read())
+        # Only if that process still is the simulator.
+        if "zephyr.exe" in open(f"/proc/{pid}/cmdline").read():
+            os.kill(pid, 15)
+    except (OSError, ValueError):
+        pass
+    for name in ("pid", "pty"):
+        try:
+            os.remove(os.path.join(SIM_DIR, name))
+        except OSError:
+            pass
+
+
+def sim_start(window):
+    """The simulator's shell is a pseudo-terminal; its path is kept in build/sim/pty."""
+    exe = os.path.join(SIM_DIR, "zephyr/zephyr.exe")
+    if not os.path.exists(exe):
+        sys.exit("no simulator build: west build -b native_sim/native/64 -d build/sim zephyr/una/app")
+    sim_stop()
+    env = dict(os.environ)
+    # SDL comes from the build environment; a library path from elsewhere breaks it.
+    env.pop("LD_LIBRARY_PATH", None)
+    if not window:
+        env["SDL_VIDEODRIVER"] = "dummy"
+    log_path = os.path.join(SIM_DIR, "sim.log")
+    with open(log_path, "w") as out:
+        # Settings are kept in flash.bin, as the watch keeps them in its flash.
+        proc = subprocess.Popen([exe, "-flash=" + os.path.join(SIM_DIR, "flash.bin")],
+                                stdin=subprocess.DEVNULL, stdout=out, stderr=out, env=env,
+                                start_new_session=True)
+    end = time.time() + 10
+    while time.time() < end:
+        found = re.search(r"connected to pseudotty: (\S+)", open(log_path).read())
+        if found:
+            break
+        if proc.poll() is not None:
+            sys.exit("the simulator stopped:\n" + open(log_path).read())
+        time.sleep(0.05)
+    else:
+        sys.exit("the simulator did not open its shell:\n" + open(log_path).read())
+    with open(os.path.join(SIM_DIR, "pid"), "w") as f:
+        f.write(str(proc.pid))
+    with open(os.path.join(SIM_DIR, "pty"), "w") as f:
+        f.write(found.group(1))
+    wait(10.0)
+    set_time()
+
+
 def set_time():
     offset_min = time.localtime().tm_gmtoff // 60
     print(shell(f"clock set {int(time.time())} {offset_min}"))
 
 
 def main():
+    global SIM
     args = sys.argv[1:]
+    if args[:1] == ["-s"]:
+        SIM, args = True, args[1:]
     if not args or args[0] in ("-h", "--help"):
         sys.exit(__doc__)
     cmd, rest = args[0], args[1:]
+    if cmd == "sim":
+        SIM = True
+        if rest == ["stop"]:
+            sim_stop()
+        elif rest in ([], ["--window"]):
+            sim_start(bool(rest))
+        else:
+            sys.exit(__doc__)
+        return
+    if SIM and cmd not in ("sh", "shot", "press", "log", "time", "wait"):
+        sys.exit(f"{cmd}: not on the simulator")
     try:
         if cmd == "sh":
             timeout = 5.0
@@ -197,7 +276,7 @@ def main():
                 timeout, rest = float(rest[1]), rest[2:]
             print(shell(" ".join(rest), timeout))
         elif cmd == "shot":
-            shot(rest[0] if rest else os.path.join(ROOT, "build/shot.png"))
+            shot(rest[0] if rest else os.path.join(ROOT, "build/sim-shot.png" if SIM else "build/shot.png"))
         elif cmd == "press":
             press(int(rest[0]), int(rest[1]) if len(rest) > 1 else 100)
         elif cmd == "flash":
