@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """Drive the UNA Watch running Zephyr over USB.
 
-  una-z sh COMMAND...        run a shell command, print its output
+  una-z sh [-t SECONDS] COMMAND...
+                             run a shell command, print its output
   una-z shot [FILE.png]      screenshot (default: build/shot.png)
   una-z press N [MS]         press button SW1-SW4 for MS milliseconds (default 100)
   una-z flash [FILE.bin]     upload a signed image, boot it as a test, confirm it
                              if it comes up; MCUboot reverts it otherwise
+  una-z log [SECONDS]        print what the shell port outputs (log messages) for
+                             SECONDS (default 5)
   una-z wait                 wait until the shell answers
+  una-z reset                reboot through mcumgr (works when the shell is stuck)
 
 The first USB serial port is the shell, the second is mcumgr.
 """
@@ -69,6 +73,24 @@ def shell(command, timeout=5.0):
         raise TimeoutError(f"no prompt after {command!r}:\n{text}")
     text = text[text.index(command) + len(command):]
     return text[: text.index(PROMPT)].strip("\n")
+
+
+def log(seconds):
+    """Print whatever arrives on the shell port, without sending anything."""
+    fd = os.open(port(0), os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+    try:
+        attr = termios.tcgetattr(fd)
+        attr[0] = attr[1] = attr[3] = 0
+        attr[2] = termios.CS8 | termios.CREAD | termios.CLOCAL
+        termios.tcsetattr(fd, termios.TCSANOW, attr)
+        end = time.time() + seconds
+        while time.time() < end:
+            if select.select([fd], [], [], 0.1)[0]:
+                text = os.read(fd, 65536).decode("utf-8", "replace")
+                sys.stdout.write(re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text).replace("\r", ""))
+                sys.stdout.flush()
+    finally:
+        os.close(fd)
 
 
 def wait(seconds=30.0):
@@ -150,13 +172,20 @@ def main():
     cmd, rest = args[0], args[1:]
     try:
         if cmd == "sh":
-            print(shell(" ".join(rest)))
+            timeout = 5.0
+            if rest[:1] == ["-t"]:
+                timeout, rest = float(rest[1]), rest[2:]
+            print(shell(" ".join(rest), timeout))
         elif cmd == "shot":
             shot(rest[0] if rest else os.path.join(ROOT, "build/shot.png"))
         elif cmd == "press":
             press(int(rest[0]), int(rest[1]) if len(rest) > 1 else 100)
         elif cmd == "flash":
             flash(rest[0] if rest else SIGNED)
+        elif cmd == "log":
+            log(float(rest[0]) if rest else 5.0)
+        elif cmd == "reset":
+            smpmgr("os", "reset")
         elif cmd == "wait":
             print(wait())
         else:

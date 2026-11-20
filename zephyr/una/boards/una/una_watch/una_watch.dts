@@ -22,6 +22,7 @@
 		zephyr,code-partition = &slot0_partition;
 		zephyr,uart-mcumgr = &cdc_acm_uart1;
 		zephyr,display = &lcd;
+		zephyr,bt-hci = &hci_spi;
 	};
 
 	aliases {
@@ -202,6 +203,30 @@ zephyr_udc0: &usbotg_hs {
 
 &otghs_phy {
 	status = "okay";
+};
+
+/*
+ * BLE module (UNAlink_BLUENRG2). The BlueNRG-234N boots with ST's own host
+ * stack; req-ll-only tells it to act as a plain controller for this session.
+ */
+&spi1 {
+	pinctrl-0 = <&spi1_sck_pg2 &spi1_miso_pg3 &spi1_mosi_pb5>;
+	pinctrl-names = "default";
+	cs-gpios = <&gpioa 15 GPIO_ACTIVE_LOW>;
+	status = "okay";
+
+	hci_spi: bluenrg-2@0 {
+		compatible = "st,hci-spi-v2";
+		reg = <0>;
+		reset-gpios = <&gpioa 8 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>;
+		irq-gpios = <&gpioa 9 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
+		spi-cpha;
+		spi-hold-cs;
+		spi-max-frequency = <DT_FREQ_M(1)>;
+		reset-event;
+		req-ll-only;
+		reset-assert-duration-ms = <6>;
+	};
 };
 
 &rtc {
