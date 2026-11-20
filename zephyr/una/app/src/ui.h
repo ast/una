@@ -36,6 +36,9 @@ void ui_home(void);
 /* Any thread: have the current screen updated now. */
 void ui_refresh(void);
 
+/* Any thread: have the current screen built again. */
+void ui_reload(void);
+
 /* Any thread: put this screen on top, unless it is there, and light up. */
 void ui_show(const struct ui_screen *screen);
 
@@ -68,6 +71,7 @@ lv_obj_t *ui_label(const lv_font_t *font, uint32_t rgb, int y);
 void ui_confirm(const char *question, void (*yes)(void));
 
 extern const struct ui_screen face_screen;
+extern const struct ui_screen face_chooser_screen;
 extern const struct ui_screen status_screen;
 extern const struct ui_screen menu_screen;
 extern const struct ui_screen settings_screen;

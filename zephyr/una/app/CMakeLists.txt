@@ -8,6 +8,7 @@ target_sources(app PRIVATE
   src/alarm.c
   src/alert.c
   src/clock.c
+  src/dial.c
   src/face.c
   src/main.c
   src/menu.c

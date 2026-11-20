@@ -30,6 +30,7 @@ enum event_type {
 	EVENT_KEY,
 	EVENT_REFRESH,
 	EVENT_SHOW,
+	EVENT_RELOAD,
 };
 
 struct event {
@@ -76,6 +77,13 @@ INPUT_CALLBACK_DEFINE(NULL, on_input, NULL);
 void ui_refresh(void)
 {
 	struct event ev = {.type = EVENT_REFRESH};
+
+	k_msgq_put(&events, &ev, K_NO_WAIT);
+}
+
+void ui_reload(void)
+{
+	struct event ev = {.type = EVENT_RELOAD};
 
 	k_msgq_put(&events, &ev, K_NO_WAIT);
 }
@@ -204,7 +212,9 @@ void ui_run(void)
 			if (ev.type == EVENT_PRESS || ev.type == EVENT_SHOW) {
 				backlight_until = k_uptime_get() + backlight_s * 1000;
 			}
-			if (ev.type == EVENT_SHOW) {
+			if (ev.type == EVENT_RELOAD) {
+				show_top();
+			} else if (ev.type == EVENT_SHOW) {
 				if (stack[depth - 1] != ev.screen) {
 					ui_push(ev.screen);
 				}

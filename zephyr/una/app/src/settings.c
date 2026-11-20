@@ -9,6 +9,7 @@
 #include <zephyr/app_version.h>
 
 #include "alert.h"
+#include "face.h"
 #include "power.h"
 #include "ui.h"
 
@@ -45,6 +46,8 @@ static const struct ui_screen about_screen = {
 /* The list */
 
 enum {
+	ROW_FACE,
+	ROW_DIAL,
 	ROW_BACKLIGHT,
 	ROW_SOUND,
 	ROW_VIBRATION,
@@ -60,6 +63,11 @@ static const char *row_text(int index)
 	static char text[24];
 
 	switch (index) {
+	case ROW_FACE:
+		snprintf(text, sizeof(text), "Face: %s", face_name());
+		return text;
+	case ROW_DIAL:
+		return face_light() ? "Dial white" : "Dial black";
 	case ROW_BACKLIGHT:
 		if (ui_backlight_s() == 0) {
 			return "Backlight off";
@@ -106,6 +114,12 @@ static void settings_key(enum ui_key key, bool held)
 		return;
 	}
 	switch (list.selected) {
+	case ROW_FACE:
+		ui_push(&face_chooser_screen);
+		break;
+	case ROW_DIAL:
+		face_set_light(!face_light());
+		break;
 	case ROW_BACKLIGHT:
 		for (int i = 0; i < ARRAY_SIZE(backlight_choices); i++) {
 			if (backlight_choices[i] == ui_backlight_s()) {

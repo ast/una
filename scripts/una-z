@@ -3,7 +3,9 @@
 
   una-z sh [-t SECONDS] COMMAND...
                              run a shell command, print its output
-  una-z shot [FILE.png]      screenshot (default: build/shot.png)
+  una-z shot [--round] [FILE.png]
+                             screenshot (default: build/shot.png); --round cuts it
+                             to the round screen, with a thin rim, for showing
   una-z press N [MS]         press button SW1-SW4 for MS milliseconds (default 100)
   una-z flash [FILE.bin]     upload a signed image, boot it as a test, confirm it
                              if it comes up; MCUboot reverts it otherwise
@@ -121,7 +123,23 @@ def wait(seconds=30.0):
     sys.exit(f"the shell did not answer within {seconds:.0f} s")
 
 
-def shot(out):
+def round_screen(img):
+    """The panel is square in memory and round behind the bezel: keep the circle."""
+    from PIL import Image, ImageDraw
+
+    n, scale = img.width, 4
+    big = n * scale
+    mask = Image.new("L", (big, big), 0)
+    ImageDraw.Draw(mask).ellipse((0, 0, big - 1, big - 1), fill=255)
+    rim = Image.new("L", (big, big), 0)
+    ImageDraw.Draw(rim).ellipse((0, 0, big - 1, big - 1), outline=255, width=2 * scale)
+    out = img.convert("RGBA")
+    out.paste((64, 64, 64, 255), mask=rim.resize((n, n), Image.LANCZOS))
+    out.putalpha(mask.resize((n, n), Image.LANCZOS))
+    return out
+
+
+def shot(out, rounded=False):
     from PIL import Image
 
     lines = shell("screenshot", 20.0).split("\n")
@@ -139,6 +157,8 @@ def shot(out):
             v = data[2 * x] | data[2 * x + 1] << 8
             px[x, y] = ((v >> 11) * 255 // 31, ((v >> 5) & 63) * 255 // 63, (v & 31) * 255 // 31)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+    if rounded:
+        img = round_screen(img)
     img.save(out)
     print(out)
 
@@ -276,7 +296,10 @@ def main():
                 timeout, rest = float(rest[1]), rest[2:]
             print(shell(" ".join(rest), timeout))
         elif cmd == "shot":
-            shot(rest[0] if rest else os.path.join(ROOT, "build/sim-shot.png" if SIM else "build/shot.png"))
+            rounded = rest[:1] == ["--round"]
+            rest = rest[1:] if rounded else rest
+            shot(rest[0] if rest else os.path.join(ROOT, "build/sim-shot.png" if SIM else "build/shot.png"),
+                 rounded)
         elif cmd == "press":
             press(int(rest[0]), int(rest[1]) if len(rest) > 1 else 100)
         elif cmd == "flash":

@@ -4,18 +4,33 @@ Workspace for writing apps (LVGL) and building firmware for the UNA Watch,
 including an own firmware on Zephyr, shown here (see [Zephyr](#zephyr)):
 
 <p>
-<img src="docs/images/face.png" width="160" alt="Watch face">
-<img src="docs/images/menu.png" width="160" alt="Menu">
-<img src="docs/images/stopwatch.png" width="160" alt="Stopwatch">
-<img src="docs/images/timer.png" width="160" alt="Timer">
-<img src="docs/images/alarm.png" width="160" alt="Alarm">
-<img src="docs/images/battery.png" width="160" alt="Battery">
-<img src="docs/images/settings.png" width="160" alt="Settings">
-<img src="docs/images/ring.png" width="160" alt="An alert ringing">
+<img src="docs/images/dial-bill.png" width="150" alt="Dial: Bill">
+<img src="docs/images/dial-rams.png" width="150" alt="Dial: Rams">
+<img src="docs/images/dial-station.png" width="150" alt="Dial: Station">
+<img src="docs/images/dial-tangente.png" width="150" alt="Dial: Tangente">
+</p>
+<p>
+<img src="docs/images/dial-bill-black.png" width="150" alt="Dial: Bill, black">
+<img src="docs/images/dial-rams-black.png" width="150" alt="Dial: Rams, black">
+<img src="docs/images/dial-station-black.png" width="150" alt="Dial: Station, black">
+<img src="docs/images/dial-tangente-black.png" width="150" alt="Dial: Tangente, black">
+</p>
+<p>
+<img src="docs/images/face.png" width="150" alt="Digital watch face">
+<img src="docs/images/menu.png" width="150" alt="Menu">
+<img src="docs/images/stopwatch.png" width="150" alt="Stopwatch">
+<img src="docs/images/timer.png" width="150" alt="Timer">
+</p>
+<p>
+<img src="docs/images/alarm.png" width="150" alt="Alarm">
+<img src="docs/images/battery.png" width="150" alt="Battery">
+<img src="docs/images/settings.png" width="150" alt="Settings">
+<img src="docs/images/ring.png" width="150" alt="An alert ringing">
 </p>
 
 Screenshots of the Zephyr firmware from its simulator, taken with `una-z -s
-shot`; the watch draws the same screens.
+shot --round`, which cuts the square image to the watch's round screen; the
+watch draws the same screens.
 
 - `refs/` — upstream clones, not tracked: `una-sdk`, `una-kernel-public`, `una-hardware`
 - `docs/` — datasheets and hardware notes, see [docs/README.md](docs/README.md)
@@ -131,10 +146,12 @@ version, including older ones.
 `zephyr/una/` holds the west manifest, the `una_watch` board, the display
 driver and the app. What it does so far:
 
-- Watch face with time, date, battery and the alarm time; stopwatch, countdown
+- Five watch faces: a digital one and four analogue dials, white or black
+  (below). Each shows the date, the battery and the alarm time.
+- Stopwatch, countdown
   timer and one daily alarm, which ring with the buzzer and the vibration
-  motor; battery screen; settings (backlight time, sound, vibration, power
-  off).
+  motor; battery screen; settings (face, dial colour, backlight time, sound,
+  vibration, power off).
 - Battery gauge and charger status, power-off, Stop mode whenever idle and off
   USB: about 0.85 mA idle, a week on a charge (measured at v0.1.0).
 - Clock from the RTC with a stored UTC offset, set from the computer.
@@ -167,6 +184,7 @@ west build -b una_watch --sysbuild -d build/zephyr zephyr/una/app
 west build -d build/zephyr && una-z flash   # ~30 s: upload, test boot, confirm
 una-z sh kernel uptime                      # any shell command
 una-z shot                                  # screenshot -> build/shot.png
+una-z shot --round face.png                 # cut to the round screen, for showing
 una-z press 3                               # press SW3 (SW1-SW4, see the board dts)
 una-z press 4 1000                          # hold SW4 for a second
 una-z log 10                                # watch log messages for 10 s
@@ -223,6 +241,25 @@ From the face, SELECT opens the menu (stopwatch, timer, alarm, battery,
 settings) and UP or DOWN shows the battery. A press is acted on at release;
 "held" is 0.7 s. Timer and alarm ring with the buzzer and the motor (`alert
 ring` in the shell does the same) until any button is pressed.
+
+### Watch faces
+
+Settings, Face opens a chooser that shows each face; UP and DOWN go through
+them. "Dial white/black" applies to the analogue ones. From the shell:
+`una-z sh face 3 1` (face 0-4, white 0 or 1).
+
+| Face | After | Battery shown as |
+|---|---|---|
+| Digital | | percentage, coloured by level |
+| Bill | Max Bill's dials for Junghans: lines only | an arc under the centre |
+| Rams | Braun's watches: numerals, batons, a yellow dot | a number; date in a window |
+| Station | the railway station clock: heavy bars, block hands | a number |
+| Tangente | Nomos: numerals and batons in turn, blue hands | a gauge where the original has its seconds |
+
+The dials are drawn in `src/dial.c`, one function each, from a few helpers
+(ticks, numerals, hands, arc, text). There is no second hand, so a dial is
+redrawn once a minute. Colours are limited to the panel's four levels per
+channel.
 
 A screen is a `struct ui_screen` (`src/ui.h`): `enter` builds its widgets,
 `update` refreshes them and says when it is next due, `key` gets the buttons.
