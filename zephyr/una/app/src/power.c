@@ -89,6 +89,16 @@ int power_status(struct power_status *st)
 	return 0;
 }
 
+static struct power_status last_status;
+static struct k_spinlock last_lock;
+
+void power_last(struct power_status *st)
+{
+	K_SPINLOCK(&last_lock) {
+		*st = last_status;
+	}
+}
+
 int power_off(void)
 {
 	/* With USB power present the PMIC starts again at once. */
@@ -193,6 +203,9 @@ static void power_thread(void *p1, void *p2, void *p3)
 
 	while (true) {
 		if (power_status(&st) == 0) {
+			K_SPINLOCK(&last_lock) {
+				last_status = st;
+			}
 			if (st.usb_power != usb_power) {
 				usb_power = st.usb_power;
 				LOG_INF("usb power %s, soc=%d mv=%d", usb_power ? "on" : "off",
@@ -222,7 +235,7 @@ static void power_thread(void *p1, void *p2, void *p3)
 		k_sleep(K_SECONDS(POLL_S));
 	}
 }
-K_THREAD_DEFINE(power_tid, 4096, power_thread, NULL, NULL, NULL, 8, 0, 10000);
+K_THREAD_DEFINE(power_tid, 4096, power_thread, NULL, NULL, NULL, 8, 0, 2000);
 
 static int cmd_history(const struct shell *sh, size_t argc, char **argv)
 {

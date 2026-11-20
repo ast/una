@@ -11,7 +11,7 @@
                              SECONDS (default 5)
   una-z logs [DIR]           copy the log files kept on the eMMC (telemetry, one
                              line a minute) to DIR (default: logs/)
-  una-z time                 set the watch's clock (UTC) from this computer
+  una-z time                 set the watch's clock and UTC offset from this computer
   una-z wait                 wait until the shell answers
   una-z reset                reboot through mcumgr (works when the shell is stuck)
 
@@ -181,8 +181,8 @@ def logs(dest):
 
 
 def set_time():
-    shell("rtc set rtc@46007800 " + time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()))
-    print(shell("rtc get rtc@46007800"))
+    offset_min = time.localtime().tm_gmtoff // 60
+    print(shell(f"clock set {int(time.time())} {offset_min}"))
 
 
 def main():

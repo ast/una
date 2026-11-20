@@ -19,6 +19,9 @@ struct power_status {
 
 int power_status(struct power_status *st);
 
+/* The power thread's latest reading, without touching the bus. */
+void power_last(struct power_status *st);
+
 /* Does not return when it works and there is no USB power. */
 int power_off(void);
 

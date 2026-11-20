@@ -6,6 +6,7 @@ project(una_zephyr)
 
 target_sources(app PRIVATE
   src/bluetooth.c
+  src/clock.c
   src/main.c
   src/power.c
   src/screenshot.c
