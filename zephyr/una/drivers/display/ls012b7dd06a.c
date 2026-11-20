@@ -49,6 +49,19 @@ BUILD_ASSERT(RGB_PIN(0) == 0 && RGB_PIN(1) == 8 && RGB_PIN(2) == 2 && RGB_PIN(3)
  */
 #define EDGE_DELAY() __asm__ volatile(".rept 36\n nop\n .endr")
 
+/*
+ * Microsecond delays from the core's cycle counter. delay_us() cannot be
+ * used: with the low-power timer as system clock its resolution is 30 us.
+ */
+static inline void delay_us(uint32_t us)
+{
+	const uint32_t start = DWT->CYCCNT;
+	const uint32_t cycles = us * (DT_PROP(DT_NODELABEL(rcc), clock_frequency) / 1000000U);
+
+	while (DWT->CYCCNT - start < cycles) {
+	}
+}
+
 struct ls012_data {
 	LPTIM_HandleTypeDef frp;
 	LPTIM_HandleTypeDef xfrp;
@@ -100,7 +113,7 @@ static void write_bitplane(const uint8_t *line, bool msb)
 	HIGH(hst_gpios);
 	EDGE_DELAY();
 	HIGH(hck_gpios);
-	k_busy_wait(1); /* without it the first pixels of the line are lost */
+	delay_us(1); /* without it the first pixels of the line are lost */
 	LOW(hck_gpios);
 	EDGE_DELAY();
 	LOW(hst_gpios);
@@ -123,9 +136,9 @@ static void write_bitplane(const uint8_t *line, bool msb)
 	EDGE_DELAY();
 	LOW(hck_gpios);
 
-	k_busy_wait(11); /* twhGEN 10.64 us */
+	delay_us(11); /* twhGEN 10.64 us */
 	LOW(enb_gpios);
-	k_busy_wait(5); /* thhGCK 4.4 us */
+	delay_us(5); /* thhGCK 4.4 us */
 }
 
 static void refresh(struct ls012_data *data)
@@ -136,16 +149,16 @@ static void refresh(struct ls012_data *data)
 	k_sched_lock();
 
 	HIGH(xrst_gpios);
-	k_busy_wait(11); /* thsINTB */
+	delay_us(11); /* thsINTB */
 	HIGH(vst_gpios);
-	k_busy_wait(11); /* thsGSP */
+	delay_us(11); /* thsGSP */
 	HIGH(vck_gpios);
-	k_busy_wait(69); /* thwGCK 68.89 us */
+	delay_us(69); /* thwGCK 68.89 us */
 
 	LOW(vck_gpios);
 	write_bitplane(line, true);
 	LOW(vst_gpios);
-	k_busy_wait(11); /* tlsGSP */
+	delay_us(11); /* tlsGSP */
 	HIGH(vck_gpios);
 	write_bitplane(line, false);
 
@@ -158,9 +171,9 @@ static void refresh(struct ls012_data *data)
 	}
 
 	LOW(vck_gpios);
-	k_busy_wait(69);
+	delay_us(69);
 	HIGH(vck_gpios);
-	k_busy_wait(69);
+	delay_us(69);
 	LOW(vck_gpios);
 	LOW(xrst_gpios);
 
@@ -287,6 +300,12 @@ static int ls012_init(const struct device *dev)
 	LL_RCC_SetLPTIMClockSource(LL_RCC_LPTIM1_CLKSOURCE_LSE);
 	LL_RCC_SetLPTIMClockSource(LL_RCC_LPTIM34_CLKSOURCE_LSE);
 	LL_APB3_GRP1_EnableClock(LL_APB3_GRP1_PERIPH_LPTIM1 | LL_APB3_GRP1_PERIPH_LPTIM3);
+	/* Keep both clocked in Stop 2: the polarity signals must never pause. */
+	LL_SRDAMR_GRP1_EnableAutonomousClock(LL_SRDAMR_GRP1_PERIPH_LPTIM1AMEN |
+					     LL_SRDAMR_GRP1_PERIPH_LPTIM3AMEN);
+
+	CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+	DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
 
 	ret = polarity_start(&data->frp, LPTIM1, LPTIM_OCPOLARITY_HIGH);
 	if (ret == 0) {

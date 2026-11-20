@@ -17,8 +17,11 @@ LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 static const struct device *const display = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
 static const struct gpio_dt_spec backlight = GPIO_DT_SPEC_GET(DT_ALIAS(backlight), gpios);
 
+#define BACKLIGHT_TIMEOUT_MS 5000
+
 static lv_obj_t *key_label;
 static atomic_t last_key;
+static int64_t backlight_until;
 
 static void on_input(struct input_event *evt, void *user_data)
 {
@@ -80,6 +83,7 @@ int main(void)
 		return 0;
 	}
 
+	backlight_until = k_uptime_get() + BACKLIGHT_TIMEOUT_MS;
 	build_screen();
 	display_blanking_off(display);
 
@@ -88,7 +92,9 @@ int main(void)
 
 		if (key != 0) {
 			lv_label_set_text_fmt(key_label, "SW%d", (int)(key - INPUT_KEY_1 + 1));
+			backlight_until = k_uptime_get() + BACKLIGHT_TIMEOUT_MS;
 		}
+		gpio_pin_set_dt(&backlight, k_uptime_get() < backlight_until);
 		/*
 		 * LVGL answers "never" (UINT32_MAX) when the screen is idle;
 		 * keep polling the buttons, and never spin.

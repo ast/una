@@ -38,7 +38,28 @@ static int add_speed(enum usbd_speed speed, struct usbd_config_node *config)
 	return err;
 }
 
-static int usb_start(void)
+static bool enabled;
+
+/*
+ * While enabled, the USB controller keeps the SoC out of Stop mode, so it is
+ * only on while there is USB power. Called from the power thread.
+ */
+void usb_set_enabled(bool on)
+{
+	int err;
+
+	if (on == enabled) {
+		return;
+	}
+	err = on ? usbd_enable(&una_usbd) : usbd_disable(&una_usbd);
+	if (err != 0) {
+		LOG_ERR("USB %s failed: %d", on ? "enable" : "disable", err);
+		return;
+	}
+	enabled = on;
+}
+
+static int usb_init(void)
 {
 	int err;
 
@@ -61,12 +82,12 @@ static int usb_start(void)
 	if (err == 0) {
 		err = usbd_init(&una_usbd);
 	}
-	if (err == 0) {
-		err = usbd_enable(&una_usbd);
-	}
 	if (err != 0) {
 		LOG_ERR("USB did not start: %d", err);
+		return err;
 	}
-	return err;
+	/* On at boot whatever the power source: a console for the first seconds. */
+	usb_set_enabled(true);
+	return 0;
 }
-SYS_INIT(usb_start, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
+SYS_INIT(usb_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);

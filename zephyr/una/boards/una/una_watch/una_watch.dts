@@ -23,6 +23,8 @@
 		zephyr,uart-mcumgr = &cdc_acm_uart1;
 		zephyr,display = &lcd;
 		zephyr,bt-hci = &hci_spi;
+		/* Runs from the LSE through Stop 2; LPTIM1 and LPTIM3 belong to the LCD. */
+		zephyr,system-timer = &lptim4;
 	};
 
 	aliases {
@@ -31,6 +33,7 @@
 		mcuboot-button0 = &button_sw1;
 		backlight = &backlight;
 		watchdog0 = &iwdg;
+		fuel-gauge0 = &fuel_gauge;
 		rtc = &rtc;
 	};
 
@@ -206,6 +209,30 @@ zephyr_udc0: &usbotg_hs {
 };
 
 /*
+ * Main bus: PMIC 0x61, fuel gauge 0x36, USB-C sink 0x29, haptic driver 0x5a,
+ * display board EEPROM 0x50. Pulled up on the board.
+ */
+&i2c1 {
+	pinctrl-0 = <&i2c1_scl_pb6 &i2c1_sda_pb7>;
+	pinctrl-names = "default";
+	clock-frequency = <I2C_BITRATE_FAST>;
+	status = "okay";
+
+	/* 200 mAh cell charged to 4.40 V; values as the stock kernel sets them. */
+	fuel_gauge: max17262@36 {
+		compatible = "maxim,max17262";
+		reg = <0x36>;
+		design-voltage = <3800>;
+		desired-voltage = <4400>;
+		desired-charging-current = <150>;
+		design-cap = <200>;
+		empty-voltage = <3400>;
+		recovery-voltage = <3960>;
+		charge-voltage = <4400>;
+	};
+};
+
+/*
  * BLE module (UNAlink_BLUENRG2). The BlueNRG-234N boots with ST's own host
  * stack; req-ll-only tells it to act as a plain controller for this session.
  */
@@ -227,6 +254,12 @@ zephyr_udc0: &usbotg_hs {
 		req-ll-only;
 		reset-assert-duration-ms = <6>;
 	};
+};
+
+&lptim4 {
+	clocks = <&rcc STM32_CLOCK(APB3, 13)>,
+		 <&rcc STM32_SRC_LSE LPTIM34_SEL(3)>;
+	status = "okay";
 };
 
 &rtc {
