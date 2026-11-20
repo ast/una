@@ -1,7 +1,8 @@
 # UNA Watch development
 
-Workspace for writing apps (LVGL) and building firmware for the UNA Watch,
-including an own firmware on Zephyr, shown here (see [Zephyr](#zephyr)):
+Workspace for writing apps (LVGL) and building firmware for the
+[UNA Watch](https://unawatch.com/). It includes an own firmware on Zephyr,
+shown here (see [Zephyr](#zephyr)):
 
 <p>
 <img src="docs/images/dial-bill.png" width="150" alt="Dial: Bill">
