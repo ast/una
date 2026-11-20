@@ -1,0 +1,26 @@
+# West manifest for the UNA Watch Zephyr firmware. The workspace is ../ (the
+# zephyr/ folder of the una repo); only this folder is tracked.
+#
+#   west init -l zephyr/una && cd zephyr && west update
+manifest:
+  remotes:
+    - name: zephyrproject-rtos
+      url-base: https://github.com/zephyrproject-rtos
+  projects:
+    - name: zephyr
+      remote: zephyrproject-rtos
+      revision: v4.5.0
+      import:
+        # Only the modules the watch needs; add names here as drivers land.
+        name-allowlist:
+          - cmsis
+          - cmsis_6
+          - hal_stm32
+          - lvgl
+          - fatfs
+          - mcuboot
+          - mbedtls
+          - tf-psa-crypto
+          - zcbor
+  self:
+    path: una

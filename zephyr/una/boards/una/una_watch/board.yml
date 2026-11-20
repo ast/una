@@ -1,0 +1,6 @@
+board:
+  name: una_watch
+  full_name: UNA Watch
+  vendor: una
+  socs:
+    - name: stm32u5a5xx

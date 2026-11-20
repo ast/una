@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Copy everything on the connected UNA drive(s) to backups/<timestamp>-<label>/.
+# Works for the normal "UNA WATCH" drive and for the bootloader's drive
+# (hold power 4 s at power-on, then connect USB). Read-only on the watch.
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+stamp=$(date +%Y%m%d-%H%M%S)
+found=0
+
+for dev in /dev/disk/by-label/UNA*; do
+  [ -e "$dev" ] || continue
+  found=1
+  label=$(lsblk -no LABEL "$dev" | tr ' ' '_')
+  mnt=$(findmnt -n -o TARGET --source "$dev" || true)
+  mounted_here=0
+  if [ -z "$mnt" ]; then
+    udisksctl mount -b "$dev" -o ro >/dev/null
+    mnt=$(findmnt -n -o TARGET --source "$dev")
+    mounted_here=1
+  fi
+  dest="$root/backups/$stamp-$label"
+  mkdir -p "$dest"
+  cp -a "$mnt/." "$dest/"
+  [ $mounted_here = 1 ] && udisksctl unmount -b "$dev" >/dev/null
+  echo "$label: $(find "$dest" -type f | wc -l) files, $(du -sh "$dest" | cut -f1) -> $dest"
+done
+
+[ $found = 1 ] || { echo "no UNA drive found; replug the watch" >&2; exit 1; }

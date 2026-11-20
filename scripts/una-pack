@@ -1,0 +1,73 @@
+#!/usr/bin/env python3
+"""Pack a raw kernel-region binary (linked at 0x08060000) into an .ota that
+the stock UNA bootloader installs.
+
+  una-pack IN.bin -o OUT.ota --version 1.7.0     # version shown by the bootloader
+
+  # MCUboot at 0x08060000 and the signed application in its slot 128 KB on
+  una-pack build/zephyr/mcuboot/zephyr/zephyr.bin \
+           --at 0x20000 build/zephyr/app/zephyr/zephyr.signed.bin \
+           -o build/zephyr/una-zephyr.ota
+
+Same container as the kernel's post_build.py: update type 1, which writes the
+kernel region only and leaves the bootloader and shared C library alone.
+"""
+import argparse
+import os
+import struct
+import sys
+import tempfile
+
+root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+kernel = os.path.join(root, "refs", "una-kernel-public")
+sys.path.insert(0, os.path.join(kernel, "Software/Utilities/Scripts/firmware_packer"))
+from encrypt_firmware import pack  # noqa: E402
+
+KEY = os.path.join(kernel, "una-bootloader/Software/Keys/SecurityKeys.pem")
+KERNEL_REGION = 3712 * 1024
+UPDATE = 1  # 2 = factory image (.gld), 4 = kernel + libc; neither is made here
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("bin")
+    ap.add_argument("--at", nargs=2, action="append", default=[], metavar=("OFFSET", "BIN"),
+                    help="place another binary at OFFSET from 0x08060000 (gap filled with 0xff)")
+    ap.add_argument("-o", "--out", required=True)
+    ap.add_argument("--version", default="0.0.1", help="major.minor.patch")
+    ap.add_argument("--suffix", default="", help="text after the version, max 22 chars")
+    ap.add_argument("--libc", default="0.0.3", help="shared C library version on the watch")
+    args = ap.parse_args()
+
+    with open(args.bin, "rb") as f:
+        image = f.read()
+    for offset, path in sorted((int(o, 0), p) for o, p in args.at):
+        if offset < len(image):
+            sys.exit(f"{path}: offset {offset:#x} overlaps what comes before it")
+        with open(path, "rb") as f:
+            image += b"\xff" * (offset - len(image)) + f.read()
+    size = len(image)
+    if size > KERNEL_REGION:
+        sys.exit(f"{size} bytes does not fit the kernel region ({KERNEL_REGION})")
+    sp, reset = struct.unpack("<II", image[:8])
+    if not (0x20000000 <= sp <= 0x20270000 and 0x08060000 <= reset < 0x08060000 + size):
+        sys.exit(f"{args.bin}: not an image linked at 0x08060000 (sp={sp:#x}, reset={reset:#x})")
+
+    major, minor, patch = (int(x) for x in args.version.split("."))
+    lmajor, lminor, lpatch = (int(x) for x in args.libc.split("."))
+    user_data = struct.pack("=BBBBBBBB23sBBBBB8s", 1, UPDATE, 0, 0,
+                            patch, minor, major, 0, args.suffix.encode(), 0,
+                            lpatch, lminor, lmajor, 0, bytes(8))
+    with tempfile.NamedTemporaryFile(suffix=".bin") as tmp:
+        tmp.write(image)
+        tmp.flush()
+        ota = pack(tmp.name, KEY, user_data)
+    if not ota:
+        sys.exit(1)
+    with open(args.out, "wb") as f:
+        f.write(ota)
+    print(f"{args.out}: {len(ota)} bytes, entry {reset:#x}")
+
+
+if __name__ == "__main__":
+    main()

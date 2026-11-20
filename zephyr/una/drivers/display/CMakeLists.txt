@@ -1,0 +1,2 @@
+zephyr_library()
+zephyr_library_sources_ifdef(CONFIG_LS012B7DD06A ls012b7dd06a.c)

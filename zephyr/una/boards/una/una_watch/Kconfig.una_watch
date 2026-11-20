@@ -1,0 +1,2 @@
+config BOARD_UNA_WATCH
+	select SOC_STM32U5A5XX

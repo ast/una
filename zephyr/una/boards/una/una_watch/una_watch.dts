@@ -1,0 +1,215 @@
+/*
+ * UNA Watch (UNAcore Rev3.2), STM32U5A5QJI6Q.
+ *
+ * Pins and clocks follow the stock kernel: main.h and
+ * Libs/Source/Drivers/STM32U5xx/System.cpp in una-kernel-public.
+ */
+
+/dts-v1/;
+#include <st/u5/stm32u5a5Xj.dtsi>
+#include <st/u5/stm32u5a5qjixq-pinctrl.dtsi>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+
+/ {
+	model = "UNA Watch";
+	compatible = "una,una-watch";
+
+	chosen {
+		zephyr,console = &cdc_acm_uart0;
+		zephyr,shell-uart = &cdc_acm_uart0;
+		zephyr,sram = &sram0;
+		zephyr,flash = &flash0;
+		zephyr,code-partition = &slot0_partition;
+		zephyr,uart-mcumgr = &cdc_acm_uart1;
+		zephyr,display = &lcd;
+	};
+
+	aliases {
+		sw0 = &button_sw1;
+		/* Held at reset: MCUboot stays in serial recovery. */
+		mcuboot-button0 = &button_sw1;
+		backlight = &backlight;
+		watchdog0 = &iwdg;
+		rtc = &rtc;
+	};
+
+	buttons: gpio_keys {
+		compatible = "gpio-keys";
+
+		/* SW1-SW4 in the stock kernel's order (HWButtons::config). */
+		button_sw1: button_sw1 {
+			label = "SW1";
+			gpios = <&gpiod 4 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+			zephyr,code = <INPUT_KEY_1>;
+		};
+
+		/* Also the PMIC's ON key: held long enough it power-cycles the watch. */
+		button_sw2: button_sw2 {
+			label = "SW2 (power)";
+			gpios = <&gpiod 15 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+			zephyr,code = <INPUT_KEY_2>;
+		};
+
+		button_sw3: button_sw3 {
+			label = "SW3";
+			gpios = <&gpioa 5 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+			zephyr,code = <INPUT_KEY_3>;
+		};
+
+		button_sw4: button_sw4 {
+			label = "SW4";
+			gpios = <&gpiod 8 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+			zephyr,code = <INPUT_KEY_4>;
+		};
+	};
+
+	lcd: lcd {
+		compatible = "sharp,ls012b7dd06a";
+		width = <240>;
+		height = <240>;
+		rotated;
+		vst-gpios = <&gpiob 10 GPIO_ACTIVE_HIGH>;
+		vck-gpios = <&gpioa 4 GPIO_ACTIVE_HIGH>;
+		enb-gpios = <&gpioa 7 GPIO_ACTIVE_HIGH>;
+		xrst-gpios = <&gpiob 1 GPIO_ACTIVE_HIGH>;
+		hst-gpios = <&gpiob 0 GPIO_ACTIVE_HIGH>;
+		hck-gpios = <&gpioa 6 GPIO_ACTIVE_HIGH>;
+		rgb-gpios = <&gpioe 0 GPIO_ACTIVE_HIGH>, <&gpioe 8 GPIO_ACTIVE_HIGH>,
+			    <&gpioe 2 GPIO_ACTIVE_HIGH>, <&gpioe 10 GPIO_ACTIVE_HIGH>,
+			    <&gpioe 4 GPIO_ACTIVE_HIGH>, <&gpioe 12 GPIO_ACTIVE_HIGH>;
+		/* FRP and XFRP */
+		pinctrl-0 = <&lptim1_ch1_pb2 &lptim3_ch1_pd14>;
+		pinctrl-names = "default";
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		backlight: backlight {
+			label = "Backlight";
+			gpios = <&gpiof 3 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>;
+		};
+	};
+};
+
+&pwr {
+	power-supply = "smps";
+};
+
+/* 16 MHz crystal, the reference of the USB HS PHY. */
+&clk_hse {
+	clock-frequency = <DT_FREQ_M(16)>;
+	status = "okay";
+};
+
+/* SiT1532 oscillator, not a crystal. */
+&clk_lse {
+	lse-bypass;
+	status = "okay";
+};
+
+&clk_lsi {
+	status = "okay";
+};
+
+&clk_msis {
+	msi-range = <0>; /* 48 MHz */
+	status = "okay";
+};
+
+&pll1 {
+	div-m = <3>;
+	mul-n = <10>;
+	div-q = <2>; /* 80 MHz, eMMC */
+	div-r = <1>; /* 160 MHz */
+	clocks = <&clk_msis>;
+	status = "okay";
+};
+
+&rcc {
+	clocks = <&pll1>;
+	clock-frequency = <DT_FREQ_M(160)>;
+	ahb-prescaler = <1>;
+	apb1-prescaler = <1>;
+	apb2-prescaler = <1>;
+	apb3-prescaler = <1>;
+};
+
+&flash0 {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		/*
+		 * The first 384 KB are the way back to the stock firmware and
+		 * cannot be restored without SWD. Never write them.
+		 */
+		una_boot_partition: partition@0 {
+			label = "una-bootloader";
+			reg = <0x00000000 DT_SIZE_K(160)>;
+			read-only;
+		};
+
+		una_libc_partition: partition@28000 {
+			label = "una-libc";
+			reg = <0x00028000 DT_SIZE_K(224)>;
+			read-only;
+		};
+
+		/*
+		 * The rest is what the stock bootloader calls the kernel: it
+		 * starts whatever is at 0x08060000, which here is MCUboot.
+		 */
+		boot_partition: partition@60000 {
+			label = "mcuboot";
+			reg = <0x00060000 DT_SIZE_K(128)>;
+		};
+
+		slot0_partition: partition@80000 {
+			label = "image-0";
+			reg = <0x00080000 DT_SIZE_K(1536)>;
+		};
+
+		/* Starts at the second flash bank. */
+		slot1_partition: partition@200000 {
+			label = "image-1";
+			reg = <0x00200000 DT_SIZE_K(1536)>;
+		};
+
+		storage_partition: partition@380000 {
+			label = "storage";
+			reg = <0x00380000 DT_SIZE_K(512)>;
+		};
+	};
+};
+
+zephyr_udc0: &usbotg_hs {
+	pinctrl-0 = <&usb_otg_hs_dm_pa11 &usb_otg_hs_dp_pa12>;
+	pinctrl-names = "default";
+	status = "okay";
+
+	/* Shell and log. */
+	cdc_acm_uart0: cdc_acm_uart0 {
+		compatible = "zephyr,cdc-acm-uart";
+	};
+
+	/* mcumgr (SMP): image upload, in the application and in MCUboot. */
+	cdc_acm_uart1: cdc_acm_uart1 {
+		compatible = "zephyr,cdc-acm-uart";
+	};
+};
+
+&otghs_phy {
+	status = "okay";
+};
+
+&rtc {
+	clocks = <&rcc STM32_CLOCK(APB3, 21)>,
+		 <&rcc STM32_SRC_LSE RTC_SEL(1)>;
+	status = "okay";
+};
+
+&iwdg {
+	status = "okay";
+};

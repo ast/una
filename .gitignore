@@ -1,0 +1,9 @@
+/refs/
+/build/
+/.direnv/
+/docs/**/*.pdf
+/firmware/
+/kernel/
+/backups/
+/zephyr/*
+!/zephyr/una/

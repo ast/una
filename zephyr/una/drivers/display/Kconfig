@@ -1,0 +1,12 @@
+config LS012B7DD06A
+	bool "Sharp LS012B7DD06A 240x240 64-colour memory LCD (parallel)"
+	default y
+	depends on DT_HAS_SHARP_LS012B7DD06A_ENABLED
+	depends on SOC_SERIES_STM32U5X
+	select USE_STM32_HAL_LPTIM
+	select USE_STM32_LL_RCC
+	select PINCTRL
+	help
+	  Bit-banged driver for the UNA Watch panel. The STM32U5 clocks the
+	  panel's shift registers directly from GPIO and drives its liquid
+	  crystal polarity signals (FRP/XFRP) from LPTIM1 and LPTIM3.

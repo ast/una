@@ -1,0 +1,45 @@
+description: |
+  Sharp LS012B7DD06A 1.2" 240x240 memory-in-pixel LCD, 2 bits per colour,
+  driven directly from STM32U5 GPIO. The six data lines must be pins 0, 8, 2,
+  10, 4 and 12 (R1 R2 G1 G2 B1 B2) of one port that has no other outputs,
+  because a pair of pixels is written to that port in one store. FRP and XFRP
+  come from LPTIM1 and LPTIM3 channel 1, selected by pinctrl-0.
+
+compatible: "sharp,ls012b7dd06a"
+
+include: [display-controller.yaml, pinctrl-device.yaml]
+
+properties:
+  vst-gpios:
+    type: phandle-array
+    required: true
+    description: Start signal of the vertical driver (GSP).
+  vck-gpios:
+    type: phandle-array
+    required: true
+    description: Shift clock of the vertical driver (GCK).
+  enb-gpios:
+    type: phandle-array
+    required: true
+    description: Write enable of the pixel memory (GEN).
+  xrst-gpios:
+    type: phandle-array
+    required: true
+    description: Reset of both drivers (INTB).
+  hst-gpios:
+    type: phandle-array
+    required: true
+    description: Start signal of the horizontal driver (BSP).
+  hck-gpios:
+    type: phandle-array
+    required: true
+    description: Shift clock of the horizontal driver (BCK).
+  rgb-gpios:
+    type: phandle-array
+    required: true
+    description: R1, R2, G1, G2, B1, B2 in that order.
+  rotated:
+    type: boolean
+    description: |
+      The panel is mounted a quarter turn round; frames are turned on the way
+      in so that the application draws upright.
