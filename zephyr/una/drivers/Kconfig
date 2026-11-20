@@ -1,3 +1,7 @@
 if DISPLAY
 rsource "display/Kconfig"
 endif
+
+if DISK_DRIVERS
+rsource "disk/Kconfig"
+endif

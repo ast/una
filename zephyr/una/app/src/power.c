@@ -9,9 +9,14 @@
 
 #include <zephyr/device.h>
 #include <zephyr/drivers/i2c.h>
+#include <zephyr/drivers/rtc.h>
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/logging/log_backend.h>
+#include <zephyr/logging/log_ctrl.h>
+#include <zephyr/pm/pm.h>
+#include <zephyr/pm/policy.h>
 #include <zephyr/shell/shell.h>
 
 #include "power.h"
@@ -98,7 +103,21 @@ int power_off(void)
 #define POLL_S    5
 #define HISTORY_N 720 /* one hour */
 
+/* How often the SoC has entered a Stop state. */
+static uint32_t stop_entries;
+
+static void on_pm_state_entry(enum pm_state state)
+{
+	if (state == PM_STATE_SUSPEND_TO_IDLE) {
+		stop_entries++;
+	}
+}
+
+static struct pm_notifier pm_notifier = {.state_entry = on_pm_state_entry};
+
 struct sample {
+	uint32_t stop_entries;
+	bool stop_locked;
 	uint32_t uptime_s;
 	int32_t microamps;
 	uint16_t millivolts;
@@ -109,12 +128,85 @@ struct sample {
 static struct sample history[HISTORY_N];
 static uint32_t history_count;
 
+/*
+ * One line a minute through the ordinary log. The file-system log backend
+ * keeps it on the eMMC (/USER:/Log/Zephyr), which is what makes battery life
+ * and usage readable after the fact: on battery there is no console.
+ */
+#define TELEMETRY_EVERY (60 / POLL_S)
+
+static void telemetry(const struct power_status *st, int32_t mean_ua)
+{
+	static const struct device *const rtc = DEVICE_DT_GET(DT_ALIAS(rtc));
+	static uint32_t last_stop_entries;
+	static uint64_t last_busy, last_idle;
+	k_thread_runtime_stats_t cpu;
+	struct rtc_time t = {0};
+	uint32_t awake_permille = 0;
+
+	if (k_thread_runtime_stats_cpu_get(0, &cpu) == 0) {
+		uint64_t busy = cpu.total_cycles - last_busy;
+		uint64_t idle = cpu.idle_cycles - last_idle;
+
+		if (busy + idle > 0) {
+			awake_permille = (uint32_t)(busy * 1000 / (busy + idle));
+		}
+		last_busy = cpu.total_cycles;
+		last_idle = cpu.idle_cycles;
+	}
+	(void)rtc_get_time(rtc, &t);
+
+	LOG_INF("tm %04d-%02d-%02dT%02d:%02d:%02dZ usb=%d soc=%d mv=%d ua=%d chg=%u "
+		"stops=%u awake=%u/1000 keys=%ld backlight_ms=%ld",
+		t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec,
+		st->usb_power, st->percent, st->millivolts, mean_ua, st->charger_state,
+		stop_entries - last_stop_entries, awake_permille,
+		(long)atomic_clear(&usage_key_presses), (long)atomic_clear(&usage_backlight_ms));
+	last_stop_entries = stop_entries;
+}
+
+/*
+ * The log core tells backends that a batch is done, which is when the file
+ * backend syncs, only after two or more messages in a row. A lone line a
+ * minute would stay in the file system's buffers until the next burst, and be
+ * lost on a reset. So: wait for the log thread to have written it, then send
+ * the same notification.
+ */
+static void log_file_sync(void)
+{
+	const struct log_backend *fs = log_backend_get_by_name("log_backend_fs");
+
+	if (fs != NULL && log_backend_is_active(fs)) {
+		k_sleep(K_MSEC(1500));
+		log_backend_notify(fs, LOG_BACKEND_EVT_PROCESS_THREAD_DONE, NULL);
+	}
+}
+
 static void power_thread(void *p1, void *p2, void *p3)
 {
 	struct power_status st;
+	bool usb_power = true;
+	int64_t sum_ua = 0;
+	int polls = 0;
+
+	pm_notifier_register(&pm_notifier);
 
 	while (true) {
 		if (power_status(&st) == 0) {
+			if (st.usb_power != usb_power) {
+				usb_power = st.usb_power;
+				LOG_INF("usb power %s, soc=%d mv=%d", usb_power ? "on" : "off",
+					st.percent, st.millivolts);
+				log_file_sync();
+			}
+			sum_ua += st.microamps;
+			if (++polls == TELEMETRY_EVERY) {
+				telemetry(&st, (int32_t)(sum_ua / polls));
+				log_file_sync();
+				sum_ua = 0;
+				polls = 0;
+			}
+
 			struct sample *s = &history[history_count++ % HISTORY_N];
 
 			s->uptime_s = k_uptime_get() / 1000;
@@ -122,24 +214,26 @@ static void power_thread(void *p1, void *p2, void *p3)
 			s->millivolts = st.millivolts;
 			s->percent = st.percent;
 			s->usb_power = st.usb_power;
+			s->stop_entries = stop_entries;
+			s->stop_locked = pm_policy_state_lock_is_active(PM_STATE_SUSPEND_TO_IDLE, 3);
 
 			usb_set_enabled(st.usb_power);
 		}
 		k_sleep(K_SECONDS(POLL_S));
 	}
 }
-K_THREAD_DEFINE(power_tid, 2048, power_thread, NULL, NULL, NULL, 8, 0, 10000);
+K_THREAD_DEFINE(power_tid, 4096, power_thread, NULL, NULL, NULL, 8, 0, 10000);
 
 static int cmd_history(const struct shell *sh, size_t argc, char **argv)
 {
 	uint32_t n = MIN(history_count, HISTORY_N);
 
-	shell_print(sh, "uptime_s usb mV %% uA");
+	shell_print(sh, "uptime_s usb mV %% uA stop_locked stop_entries");
 	for (uint32_t i = history_count - n; i < history_count; i++) {
 		const struct sample *s = &history[i % HISTORY_N];
 
-		shell_print(sh, "%u %d %u %u %d", s->uptime_s, s->usb_power, s->millivolts,
-			    s->percent, s->microamps);
+		shell_print(sh, "%u %d %u %u %d %d %u", s->uptime_s, s->usb_power, s->millivolts,
+			    s->percent, s->microamps, s->stop_locked, s->stop_entries);
 	}
 	return 0;
 }
@@ -167,9 +261,41 @@ static int cmd_off(const struct shell *sh, size_t argc, char **argv)
 	return power_off();
 }
 
+/* Exercises the on-battery USB teardown and restart without unplugging. */
+static int cmd_usbcycle(const struct shell *sh, size_t argc, char **argv)
+{
+	usb_set_enabled(false);
+	k_sleep(K_SECONDS(3));
+	usb_set_enabled(true);
+	return 0;
+}
+
+/*
+ * With USB off for 3 s: is anything else keeping the SoC out of Stop mode?
+ * The console is gone meanwhile, so the answer is kept for "pmdiag show".
+ */
+static char diag[101];
+
+static int cmd_pmdiag(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc > 1) {
+		shell_print(sh, "%s", diag);
+		return 0;
+	}
+	usb_set_enabled(false);
+	for (int i = 0; i < 100; i++) {
+		k_sleep(K_MSEC(100));
+		diag[i] = pm_policy_state_lock_is_active(PM_STATE_SUSPEND_TO_IDLE, 3) ? 'L' : '.';
+	}
+	usb_set_enabled(true);
+	return 0;
+}
+
 SHELL_STATIC_SUBCMD_SET_CREATE(power_cmds,
 	SHELL_CMD(status, NULL, "Battery and charger state", cmd_status),
 	SHELL_CMD(history, NULL, "Samples of the last hour, one every 5 s", cmd_history),
+	SHELL_CMD(usbcycle, NULL, "Stop USB for 3 s and start it again", cmd_usbcycle),
+	SHELL_CMD(pmdiag, NULL, "Stop USB for 10 s and note Stop-mode locks; \"pmdiag show\" prints them", cmd_pmdiag),
 	SHELL_CMD(off, NULL, "Power the watch off (wake with the power button)", cmd_off),
 	SHELL_SUBCMD_SET_END);
 SHELL_CMD_REGISTER(power, &power_cmds, "Battery, charger, power-off", NULL);

@@ -1,0 +1,24 @@
+description: |
+  A contiguous range of sectors of another disk, presented as a disk of its
+  own. The UNA Watch's eMMC is divided this way, without a partition table of
+  its own: each region starts with an MBR and holds one exFAT volume.
+
+compatible: "una,disk-region"
+
+properties:
+  disk-name:
+    type: string
+    required: true
+    description: Name the region is registered under.
+  parent-disk:
+    type: string
+    required: true
+    description: Name of the disk the region is part of.
+  start-sector:
+    type: int
+    required: true
+  sector-count:
+    type: int
+    description: Leave out for "to the end of the parent".
+  read-only:
+    type: boolean

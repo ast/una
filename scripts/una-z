@@ -9,6 +9,9 @@
                              if it comes up; MCUboot reverts it otherwise
   una-z log [SECONDS]        print what the shell port outputs (log messages) for
                              SECONDS (default 5)
+  una-z logs [DIR]           copy the log files kept on the eMMC (telemetry, one
+                             line a minute) to DIR (default: logs/)
+  una-z time                 set the watch's clock (UTC) from this computer
   una-z wait                 wait until the shell answers
   una-z reset                reboot through mcumgr (works when the shell is stuck)
 
@@ -165,6 +168,23 @@ def flash(path):
         sys.exit("the previous image is running: the new one did not boot and was reverted")
 
 
+LOG_DIR = "/USER:/Log/Zephyr"
+
+
+def logs(dest):
+    os.makedirs(dest, exist_ok=True)
+    names = [l.split()[-1] for l in shell(f"fs ls {LOG_DIR}").split("\n") if l.split()[-1:] and
+             l.split()[-1].startswith("log.")]
+    for name in sorted(names):
+        smpmgr("file", "download", f"{LOG_DIR}/{name}", os.path.join(dest, name))
+        print(os.path.join(dest, name), os.path.getsize(os.path.join(dest, name)), "bytes")
+
+
+def set_time():
+    shell("rtc set rtc@46007800 " + time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()))
+    print(shell("rtc get rtc@46007800"))
+
+
 def main():
     args = sys.argv[1:]
     if not args or args[0] in ("-h", "--help"):
@@ -186,6 +206,10 @@ def main():
             log(float(rest[0]) if rest else 5.0)
         elif cmd == "reset":
             smpmgr("os", "reset")
+        elif cmd == "logs":
+            logs(rest[0] if rest else os.path.join(ROOT, "logs"))
+        elif cmd == "time":
+            set_time()
         elif cmd == "wait":
             print(wait())
         else:

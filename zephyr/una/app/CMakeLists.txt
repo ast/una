@@ -9,6 +9,7 @@ target_sources(app PRIVATE
   src/main.c
   src/power.c
   src/screenshot.c
+  src/storage.c
   src/usb.c
   src/watchdog.c
 )

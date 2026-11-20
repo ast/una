@@ -5,6 +5,7 @@
 
 #include <zephyr/device.h>
 #include <zephyr/init.h>
+#include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/usb/usbd.h>
 
@@ -23,13 +24,13 @@ USBD_DESC_CONFIG_DEFINE(una_hs_cfg_desc, "HS Configuration");
 USBD_CONFIGURATION_DEFINE(una_fs_config, 0, 125, &una_fs_cfg_desc);
 USBD_CONFIGURATION_DEFINE(una_hs_config, 0, 125, &una_hs_cfg_desc);
 
-static int add_speed(enum usbd_speed speed, struct usbd_config_node *config)
-{
-	int err = usbd_add_configuration(&una_usbd, speed, config);
+static bool enabled;
 
-	if (err == 0) {
-		err = usbd_register_all_classes(&una_usbd, speed, 1, NULL);
-	}
+/* What usbd_shutdown() removes and every start has to put back. */
+static int add_functions(enum usbd_speed speed)
+{
+	int err = usbd_register_all_classes(&una_usbd, speed, 1, NULL);
+
 	if (err == 0) {
 		/* Interface association descriptors are in use. */
 		err = usbd_device_set_code_triple(&una_usbd, speed, USB_BCC_MISCELLANEOUS, 0x02,
@@ -38,29 +39,9 @@ static int add_speed(enum usbd_speed speed, struct usbd_config_node *config)
 	return err;
 }
 
-static bool enabled;
-
-/*
- * While enabled, the USB controller keeps the SoC out of Stop mode, so it is
- * only on while there is USB power. Called from the power thread.
- */
-void usb_set_enabled(bool on)
+static int usb_start(void)
 {
-	int err;
-
-	if (on == enabled) {
-		return;
-	}
-	err = on ? usbd_enable(&una_usbd) : usbd_disable(&una_usbd);
-	if (err != 0) {
-		LOG_ERR("USB %s failed: %d", on ? "enable" : "disable", err);
-		return;
-	}
-	enabled = on;
-}
-
-static int usb_init(void)
-{
+	const bool hs = USBD_SUPPORTS_HIGH_SPEED && usbd_caps_speed(&una_usbd) == USBD_SPEED_HS;
 	int err;
 
 	err = usbd_add_descriptor(&una_usbd, &una_lang);
@@ -73,14 +54,63 @@ static int usb_init(void)
 	if (err == 0) {
 		err = usbd_add_descriptor(&una_usbd, &una_sn);
 	}
-	if (err == 0 && USBD_SUPPORTS_HIGH_SPEED && usbd_caps_speed(&una_usbd) == USBD_SPEED_HS) {
-		err = add_speed(USBD_SPEED_HS, &una_hs_config);
+	if (err == 0 && hs) {
+		err = add_functions(USBD_SPEED_HS);
 	}
 	if (err == 0) {
-		err = add_speed(USBD_SPEED_FS, &una_fs_config);
+		err = add_functions(USBD_SPEED_FS);
 	}
 	if (err == 0) {
 		err = usbd_init(&una_usbd);
+	}
+	if (err == 0) {
+		err = usbd_enable(&una_usbd);
+	}
+	return err;
+}
+
+static int usb_stop(void)
+{
+	int err = usbd_disable(&una_usbd);
+
+	/* Shutdown, not only disable: that is what powers the PHY down. */
+	if (err == 0) {
+		err = usbd_shutdown(&una_usbd);
+	}
+	return err;
+}
+
+/*
+ * While enabled, the USB controller keeps the SoC out of Stop mode, so it is
+ * only on while there is USB power. Called from the power thread.
+ */
+void usb_set_enabled(bool on)
+{
+	static K_MUTEX_DEFINE(lock);
+	int err;
+
+	k_mutex_lock(&lock, K_FOREVER);
+	if (on != enabled) {
+		err = on ? usb_start() : usb_stop();
+		if (err != 0) {
+			LOG_ERR("USB %s failed: %d", on ? "start" : "stop", err);
+		} else {
+			enabled = on;
+		}
+	}
+	k_mutex_unlock(&lock);
+}
+
+static int usb_init(void)
+{
+	int err = 0;
+
+	/* Configurations survive a shutdown and are added once. */
+	if (USBD_SUPPORTS_HIGH_SPEED && usbd_caps_speed(&una_usbd) == USBD_SPEED_HS) {
+		err = usbd_add_configuration(&una_usbd, USBD_SPEED_HS, &una_hs_config);
+	}
+	if (err == 0) {
+		err = usbd_add_configuration(&una_usbd, USBD_SPEED_FS, &una_fs_config);
 	}
 	if (err != 0) {
 		LOG_ERR("USB did not start: %d", err);

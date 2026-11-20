@@ -12,6 +12,8 @@
 
 #include <lvgl.h>
 
+#include "power.h"
+
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
 static const struct device *const display = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
@@ -22,6 +24,10 @@ static const struct gpio_dt_spec backlight = GPIO_DT_SPEC_GET(DT_ALIAS(backlight
 static lv_obj_t *key_label;
 static atomic_t last_key;
 static int64_t backlight_until;
+static K_SEM_DEFINE(wake, 0, 1);
+
+atomic_t usage_key_presses;
+atomic_t usage_backlight_ms;
 
 static void on_input(struct input_event *evt, void *user_data)
 {
@@ -30,9 +36,11 @@ static void on_input(struct input_event *evt, void *user_data)
 	if (evt->type != INPUT_EV_KEY) {
 		return;
 	}
-	LOG_INF("key %u %s", evt->code, evt->value ? "down" : "up");
+	LOG_DBG("key %u %s", evt->code, evt->value ? "down" : "up");
 	if (evt->value) {
+		atomic_inc(&usage_key_presses);
 		atomic_set(&last_key, evt->code);
+		k_sem_give(&wake);
 	}
 }
 INPUT_CALLBACK_DEFINE(NULL, on_input, NULL);
@@ -87,6 +95,8 @@ int main(void)
 	build_screen();
 	display_blanking_off(display);
 
+	int64_t loop_start = k_uptime_get();
+
 	while (true) {
 		atomic_val_t key = atomic_clear(&last_key);
 
@@ -94,12 +104,24 @@ int main(void)
 			lv_label_set_text_fmt(key_label, "SW%d", (int)(key - INPUT_KEY_1 + 1));
 			backlight_until = k_uptime_get() + BACKLIGHT_TIMEOUT_MS;
 		}
-		gpio_pin_set_dt(&backlight, k_uptime_get() < backlight_until);
+		if (k_uptime_get() < backlight_until) {
+			gpio_pin_set_dt(&backlight, 1);
+			atomic_add(&usage_backlight_ms, k_uptime_get() - loop_start);
+		} else {
+			gpio_pin_set_dt(&backlight, 0);
+		}
+		loop_start = k_uptime_get();
 		/*
-		 * LVGL answers "never" (UINT32_MAX) when the screen is idle;
-		 * keep polling the buttons, and never spin.
+		 * LVGL answers "never" (UINT32_MAX) when the screen is idle.
+		 * With the backlight off nothing needs polling: sleep until a
+		 * button, so the SoC can stay in Stop mode.
 		 */
-		k_msleep(CLAMP(lv_timer_handler(), 5, 50));
+		uint32_t next_ms = CLAMP(lv_timer_handler(), 5, 50);
+
+		if (k_uptime_get() >= backlight_until) {
+			next_ms = 1000;
+		}
+		k_sem_take(&wake, K_MSEC(next_ms));
 	}
 	return 0;
 }

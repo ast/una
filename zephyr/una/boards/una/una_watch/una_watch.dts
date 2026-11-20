@@ -86,6 +86,19 @@
 		pinctrl-names = "default";
 	};
 
+	/*
+	 * The eMMC as the stock firmware and the UNA bootloader divide it. The
+	 * first 100 MiB are the bootloader's own volume ("UNA BOOT": update
+	 * files, factory image, GNSS firmware) and are deliberately not
+	 * reachable from here; the next two regions are unused by Zephyr.
+	 */
+	user_disk: user-disk {
+		compatible = "una,disk-region";
+		disk-name = "USER";
+		parent-disk = "MMC";
+		start-sector = <614400>;
+	};
+
 	leds {
 		compatible = "gpio-leds";
 
@@ -254,6 +267,86 @@ zephyr_udc0: &usbotg_hs {
 		req-ll-only;
 		reset-assert-duration-ms = <6>;
 	};
+};
+
+/*
+ * Power enables of parts nothing drives yet, held off as the stock kernel
+ * boots them. Left floating, the GNSS module's own pull-up turns it on.
+ */
+&gpiod {
+	buzzer-en2-hog {
+		gpio-hog;
+		gpios = <5 GPIO_ACTIVE_HIGH>;
+		output-low;
+	};
+};
+
+&gpiog {
+	altimeter-en-hog {
+		gpio-hog;
+		gpios = <0 GPIO_ACTIVE_HIGH>;
+		output-low;
+	};
+
+	gnss-en-hog {
+		gpio-hog;
+		gpios = <5 GPIO_ACTIVE_HIGH>;
+		output-low;
+	};
+
+	vled-en-hog {
+		gpio-hog;
+		gpios = <10 GPIO_ACTIVE_HIGH>;
+		output-low;
+	};
+};
+
+&gpiof {
+	haptic-rst-hog {
+		gpio-hog;
+		gpios = <2 GPIO_ACTIVE_HIGH>;
+		output-low;
+	};
+
+	ppg-en-hog {
+		gpio-hog;
+		gpios = <13 GPIO_ACTIVE_HIGH>;
+		output-low;
+	};
+};
+
+&gpiob {
+	buzzer-en1-hog {
+		gpio-hog;
+		gpios = <9 GPIO_ACTIVE_HIGH>;
+		output-low;
+	};
+
+	/* USB_DAM: high hides USB when a debug accessory is attached. */
+	usb-dam-hog {
+		gpio-hog;
+		gpios = <15 GPIO_ACTIVE_HIGH>;
+		output-low;
+	};
+};
+
+/* 4 GB eMMC; its supply is switched by EMMC_EN. */
+&sdmmc1 {
+	pinctrl-0 = <&sdmmc1_d0_pc8 &sdmmc1_d1_pc9 &sdmmc1_d2_pc10 &sdmmc1_d3_pc11
+		     &sdmmc1_ck_pc12 &sdmmc1_cmd_pd2>;
+	pinctrl-names = "default";
+	clocks = <&rcc STM32_CLOCK(AHB2, 27)>,
+		 <&rcc STM32_SRC_HSI48 SDMMC_SEL(0)>;
+	pwr-gpios = <&gpiod 10 GPIO_ACTIVE_HIGH>;
+	bus-width = <4>;
+	/* 48 MHz / (2 * 1) = 24 MHz. Undivided, reads overrun the receive FIFO. */
+	clk-div = <1>;
+	disk-name = "MMC";
+	status = "okay";
+};
+
+&clk_hsi48 {
+	status = "okay";
 };
 
 &lptim4 {

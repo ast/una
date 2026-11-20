@@ -137,7 +137,34 @@ west build -d build/zephyr && una-z flash   # ~30 s: upload, test boot, confirm
 una-z sh kernel uptime                      # any shell command
 una-z shot                                  # screenshot -> build/shot.png
 una-z press 3                               # press SW3 (SW1-SW4, see the board dts)
+una-z log 10                                # watch log messages for 10 s
+una-z logs                                  # copy the log files off the eMMC -> logs/
+una-z time                                  # set the watch's clock from this computer
+una-z reset                                 # reboot through mcumgr
 ```
+
+### Telemetry
+
+The watch writes its ordinary Zephyr log to the eMMC with the standard
+file-system log backend: `/USER:/Log/Zephyr/log.NNNN`, 32 files of 1 MB, oldest
+overwritten. `/USER:` is the stock firmware's user volume, so the same files
+are under `Log/Zephyr/` when the stock firmware shows the drive over USB.
+
+Once a minute the power thread logs one line:
+
+```
+power: tm 2026-11-20T10:59:21Z usb=1 soc=99 mv=4400 ua=-1041 chg=6 stops=0 awake=0/1000 keys=0 backlight_ms=0
+```
+
+`ua` is the mean battery current over the minute (negative = discharging; the
+gauge is only good to a few mA), `stops` the number of Stop-mode entries,
+`awake` the share of the minute the CPU was not idle, `keys` and
+`backlight_ms` button presses and backlight time. USB power changes are logged
+as they happen.
+
+Wear: a line is about 120 bytes, so about 170 KB a day, and each line costs
+one sync of a few 4 KB blocks. Even at 1 MB of flash writes per sync that is
+1.4 GB a day against roughly 12 TB of endurance (4 GB at 3000 cycles): decades.
 
 `una-z flash` boots the new image once as a test and confirms it when its shell
 answers. An image that crashes, hangs (8 s watchdog) or is never confirmed is

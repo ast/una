@@ -4,14 +4,29 @@
  */
 
 #include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/drivers/gpio.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
 LOG_MODULE_REGISTER(bluetooth, LOG_LEVEL_INF);
 
+/* Experiment: with this at 0 the radio chip is held in reset instead. */
+#define BT_AUTOSTART 0
+
 static void bluetooth_thread(void *p1, void *p2, void *p3)
 {
-	int err = bt_enable(NULL);
+	int err;
+
+	if (!BT_AUTOSTART) {
+		static const struct gpio_dt_spec reset =
+			GPIO_DT_SPEC_GET(DT_CHOSEN(zephyr_bt_hci), reset_gpios);
+
+		gpio_pin_configure_dt(&reset, GPIO_OUTPUT_ACTIVE);
+		LOG_INF("Bluetooth chip held in reset");
+		return;
+	}
+
+	err = bt_enable(NULL);
 
 	if (err != 0) {
 		LOG_ERR("Bluetooth did not start: %d", err);
