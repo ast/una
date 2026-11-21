@@ -54,7 +54,7 @@ injection.
   driver speaks the same `$PAIR` commands and is the base).
 - Open and reusable from the stock kernel/SDK (MIT): daily-health algorithms,
   floor counter, compass calibration, cadence estimator, FIT encoder
-  (`una-sdk/Libs/Source/Fit`), EPO parser, DRV2625 and Bosch sensor setup.
+  (`una-kernel-public/SDK/Libs/Source/Fit`), EPO parser, DRV2625 and Bosch sensor setup.
 
 ## Phases
 

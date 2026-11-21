@@ -1,5 +1,5 @@
 {
-  description = "UNA Watch app and firmware development environment";
+  description = "UNA Watch Zephyr firmware development environment";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
 
@@ -20,16 +20,12 @@
           gnumake
           pkg-config
 
-          # app_packer / app_merging (pyelftools, pillow), firmware_packer
-          # (bincopy), lvgl_assets (pypng, lz4); the rest is for the Zephyr
-          # build (west and zephyr/scripts/requirements-base.txt)
+          # The Zephyr build (west and zephyr/scripts/requirements-base.txt);
+          # pillow is for una-z's screenshots
           (python3.withPackages (
             ps: with ps; [
               pyelftools
               pillow
-              bincopy
-              pypng
-              lz4
               west
               pyyaml
               pykwalify
@@ -46,12 +42,9 @@
             ]
           ))
 
-          # LVGL / glance simulators (host build)
+          # The simulator (Zephyr's native_sim, host build)
           gcc
           SDL2
-
-          # lvgl_assets.py runs `npx lv_font_conv`
-          nodejs
 
           # Zephyr build: devicetree compiler, gperf for the kobject hash
           dtc

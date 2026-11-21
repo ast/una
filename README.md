@@ -1,8 +1,7 @@
-# UNA Watch development
+# UNA Watch on Zephyr
 
-Workspace for writing apps (LVGL) and building firmware for the
-[UNA Watch](https://unawatch.com/). It includes an own firmware on Zephyr,
-shown here (see [Zephyr](#zephyr)):
+An own firmware for the [UNA Watch](https://unawatch.com/), built on
+[Zephyr](https://zephyrproject.org/) in place of the stock kernel:
 
 <p>
 <img src="docs/images/dial-bill.png" width="150" alt="Dial: Bill">
@@ -29,123 +28,28 @@ shown here (see [Zephyr](#zephyr)):
 <img src="docs/images/elec.png" width="150" alt="Electrical system page">
 </p>
 
-Screenshots of the Zephyr firmware from its simulator, taken with `una-z -s
+Screenshots from the firmware's simulator, taken with `una-z -s
 shot --round`, which cuts the square image to the watch's round screen; the
 watch draws the same screens.
 
-- `refs/` — upstream clones, not tracked: `una-sdk`, `una-kernel-public`, `una-hardware`
-- `docs/` — datasheets and hardware notes, see [docs/README.md](docs/README.md)
-- `scripts/` — `una-install`, `una-build-kernel`, `una-pack`, `una-z` (on `PATH` inside the dev shell)
-- `zephyr/` — west workspace for the Zephyr firmware; only `zephyr/una/` is tracked
-- `apps/` — your own apps
-- `build/` — out-of-tree build output, not tracked
-
-Upstream documentation is in `refs/una-sdk/Docs/`; start with `sdk-setup.md`,
-`platform-overview.md` and `Tutorials/HelloWorld/ARCHITECTURE.md`.
+- `zephyr/` — west workspace; only `zephyr/una/` is tracked: the manifest, the
+  `una_watch` board, drivers and the app
+- `scripts/` — `una-z` (drive the watch or the simulator), `una-pack` and
+  `una-backup` (first install), on `PATH` inside the dev shell
+- `docs/` — the plan ([docs/zephyr-plan.md](docs/zephyr-plan.md)), datasheets
+  and hardware notes ([docs/README.md](docs/README.md))
+- `refs/` — upstream clones, not tracked: `una-kernel-public` (the stock
+  firmware's source, the reference for every driver here, and its packer,
+  which `una-pack` uses) and `una-hardware` (schematics)
+- `build/` — build output, not tracked
 
 ## Environment
 
-`direnv allow` once; the flake provides Arm GNU Toolchain 14.3.rel1, CMake, Ninja,
-Python with the packer dependencies, SDL2 for the simulator, Node.js for the LVGL
-font converter, plus openocd, probe-rs, tio and clangd. `UNA_SDK` points at
-`refs/una-sdk`.
+`direnv allow` once; the flake provides Arm GNU Toolchain 14.3.rel1, CMake,
+Ninja, Python with what west and the Zephyr build need, SDL2 for the
+simulator, smpmgr for firmware upload, plus openocd, probe-rs, tio and clangd.
 
-## Build an app
-
-```sh
-cmake -G Ninja -S refs/una-sdk/Docs/Tutorials/HelloWorld/Software/Apps/HelloWorldLVGL-CMake -B build/hello
-cmake --build build/hello        # -> build/hello/HelloWorldLVGL_<version>.uapp
-```
-
-`apps/hello` is a working copy of that tutorial with its own name and ID:
-
-```sh
-cmake -G Ninja -S apps/hello/Software/Apps/Hello-CMake -B build/hello
-cmake --build build/hello        # also copied to apps/hello/Output/
-cmake -G Ninja -S apps/hello/Software/Apps/LVGL-GUI/simulator -B build/hello-sim
-cmake --build build/hello-sim    # -> apps/hello/Software/Apps/LVGL-GUI/simulator/build/bin/HelloSimulator
-```
-
-To start another app, copy an LVGL tutorial (`refs/una-sdk/Docs/Tutorials/*`, the
-`LVGL-GUI` and `*LVGL-CMake` folders plus `Libs`) into `apps/` and change
-`APP_NAME` and `APP_ID` in its `CMakeLists.txt`.
-
-## Simulator
-
-```sh
-cmake -G Ninja -S refs/una-sdk/Docs/Tutorials/HelloWorld/Software/Apps/LVGL-GUI/simulator -B build/hello-sim
-cmake --build build/hello-sim
-```
-
-The binary is written to `bin/` inside the build directory. Keys 1-4 are the
-buttons L1, L2, R1, R2; Esc quits.
-
-## Install on the watch
-
-Connect USB and wait for the `UNA WATCH` drive, then:
-
-```sh
-una-install build/hello/HelloWorldLVGL_*.uapp   # copies to Apps/HelloWorldLVGL/
-una-install -l                                  # list what is installed
-```
-
-The app list is only rebuilt at boot. `una-install -r FILE.uapp` reboots the watch
-over its serial console after copying (`una-cli reset` does only the reboot).
-
-On kernel 1.7.0 the drive does not come back after such a reboot until the cable
-is replugged, so each new build still needs one replug. Upstream PR
-[una-kernel-public#15](https://github.com/UNAWatch/una-kernel-public/pull/15)
-adds a `usb drive on` console command that removes that.
-
-## Console and logs
-
-`una-cli menu` lists the console commands; `tio /dev/una-watch` opens it
-interactively (commands must end in LF, prompt `una>`). Stay off the port for
-about 10 seconds after the watch starts: typing in that window enters factory
-test mode (`una-test>`); closing the port restarts the watch normally.
-
-The debug UART (USART3 TX, 921600 baud) needs a USB-C debug adapter, see
-[docs/README.md](docs/README.md).
-
-## Kernel
-
-`kernel/` is a working clone of the kernel repo (not tracked here), on branch
-`custom`. `refs/una-kernel-public` stays pristine.
-
-```sh
-una-build-kernel        # Docker, image xanderhendriks/stm32cubeide:16.0, ~4 min
-```
-
-Output goes to `kernel/Exe/`. Images worth keeping are in `firmware/` with a
-`SHA256SUMS` file:
-
-- `firmware/official-v1.7.0/` — UNA's release, the restore image. A local build
-  of tag `v1.7.0` is bit-identical to it.
-- `firmware/custom-<version>/` — own builds.
-
-### Install a kernel (same steps for custom and for restoring the official one)
-
-1. Charge the watch; the bootloader refuses to update on low battery.
-2. Turn the watch off, then hold the power button for 4 seconds as it turns on,
-   until the bootloader menu appears.
-3. Connect USB. The watch shows "USB connected" and a drive appears.
-4. First time only: run `una-backup` to save what is on that drive, including the
-   factory-reset image (`.gld`) the watch shipped with.
-5. Copy the `.ota` to the root of the drive. Leave the `.gld` alone unless you
-   want to change what a factory reset restores.
-6. Eject, unplug, and choose **Continue** in the bootloader menu. On bootloader
-   0.1.4 this starts the old firmware once more; the update is installed at
-   the next reset (hold power ~20 s). It then stays at 100 % until one more
-   reset.
-
-To go back to stock, do the same with
-`firmware/official-v1.7.0/UnaWatch-Kernel_1.7.0.ota`. The bootloader accepts any
-version, including older ones.
-
-## Zephyr
-
-`zephyr/una/` holds the west manifest, the `una_watch` board, the display
-driver and the app. What it does so far:
+## What it does
 
 - Five watch faces: a digital one and four analogue dials, white or black
   (below). Each shows the date, the battery and the alarm time.
@@ -186,7 +90,7 @@ west init -l zephyr/una && (cd zephyr && west update --narrow -o=--depth=1)   # 
 west build -b una_watch --sysbuild -d build/zephyr zephyr/una/app
 ```
 
-### Day to day, cable in, no buttons
+## Day to day, cable in, no buttons
 
 ```sh
 west build -d build/zephyr && una-z flash   # ~30 s: upload, test boot, confirm
@@ -214,7 +118,7 @@ running unconfirmed and the next upload fails. `una-z sh mcuboot` shows that
 state (`confirmed: 0`); `una-z sh mcuboot confirm` keeps the image, a reset
 puts the previous one back.
 
-### Simulator
+## Simulator
 
 The same app builds as a Linux program (Zephyr's `native_sim`): the UI, the
 shell, settings, the clock, alarms and timers run as on the watch, with the
@@ -241,7 +145,7 @@ una-z sim stop
 `boards/native_sim_native_64.conf` are added for each. Settings are kept in
 `build/sim/flash.bin`.
 
-### Buttons and screens
+## Buttons and screens
 
 The pages lie in a ring and the buttons mean the same on all of them:
 
@@ -277,7 +181,7 @@ and red for what needs attention, cyan for what can be set, grey for what is
 off or not known. They are drawn in `src/systems.c` with the helpers of
 `src/draw.c`.
 
-### Recording
+## Recording
 
 SELECT on the Record page starts at once; the clock runs while the receiver
 looks for its first fix. A short press only ever pauses and resumes, so a
@@ -308,7 +212,7 @@ time to the first fix), so that what happened outdoors can be read from
 `una-z logs` afterwards; `una-z sh gnss` shows the same now, and `una-z sh
 gnss on` turns it on from the shell.
 
-### Watch faces
+## Watch faces
 
 SELECT on the face opens a chooser that shows each face; UP and DOWN go
 through them and SELECT turns an analogue dial white or black. From the shell:
@@ -331,7 +235,7 @@ A screen is a `struct ui_screen` (`src/ui.h`): `enter` builds its widgets,
 `update` refreshes them and says when it is next due, `key` gets the buttons.
 The main thread sleeps between those, so an idle screen costs nothing.
 
-### Telemetry
+## Telemetry
 
 The watch writes its ordinary Zephyr log to the eMMC with the standard
 file-system log backend: `/USER:/Log/Zephyr/log.NNNN`, 32 files of 1 MB, oldest
@@ -354,7 +258,7 @@ Wear: a line is about 120 bytes, so about 170 KB a day, and each line costs
 one sync of a few 4 KB blocks. Even at 1 MB of flash writes per sync that is
 1.4 GB a day against roughly 12 TB of endurance (4 GB at 3000 cycles): decades.
 
-### When the app does not come up
+## When the app does not come up
 
 - **MCUboot recovery:** hold SW1 (top-left) through a reset. The screen keeps
   the UNA logo and the watch enumerates as "UNA Watch MCUboot". Then
@@ -363,9 +267,13 @@ one sync of a few 4 KB blocks. Even at 1 MB of flash writes per sync that is
 - **Reset without a working app:** hold the power button (top-right) for about
   20 s; the PMIC power-cycles the watch. Keep holding for the UNA bootloader
   menu, release for a normal start.
-- **First install, or MCUboot itself is broken:** pack MCUboot and the app into
-  one `.ota` and install it like a kernel (above). `firmware/zephyr-<version>/`
-  keeps one that is known to work.
+- **MCUboot itself is broken:** install the `.ota` again through the UNA
+  bootloader, as for the first install (below).
+
+## First install, and going back to stock
+
+The stock bootloader installs a kernel from an `.ota` file and does not care
+whose it is. For Zephyr, MCUboot and the app are packed into one:
 
 ```sh
 una-pack build/zephyr/mcuboot/zephyr/zephyr.bin \
@@ -373,7 +281,27 @@ una-pack build/zephyr/mcuboot/zephyr/zephyr.bin \
          -o build/zephyr/una-zephyr.ota
 ```
 
-### What protects the restore path
+`firmware/zephyr-<version>/` (not tracked) keeps one that is known to work.
+After this once, updates go over USB with `una-z flash`.
+
+1. Charge the watch; the bootloader refuses to update on low battery.
+2. Turn the watch off, then hold the power button for 4 seconds as it turns on,
+   until the bootloader menu appears.
+3. Connect USB. The watch shows "USB connected" and a drive appears.
+4. First time only: run `una-backup` to save what is on that drive, including the
+   factory-reset image (`.gld`) the watch shipped with.
+5. Copy the `.ota` to the root of the drive. Leave the `.gld` alone unless you
+   want to change what a factory reset restores.
+6. Eject, unplug, and choose **Continue** in the bootloader menu. On bootloader
+   0.1.4 this starts the old firmware once more; the update is installed at
+   the next reset (hold power ~20 s). It then stays at 100 % until one more
+   reset.
+
+To go back to stock, do the same with UNA's own release
+(`firmware/official-v1.7.0/UnaWatch-Kernel_1.7.0.ota` here; `firmware/` is
+not tracked). The bootloader accepts any version, including older ones.
+
+### What protects the way back
 
 - An `.ota` holds only the kernel (flash from 0x08060000). The bootloader and the
   shared C library in the first 384 KB are not written by an update.
