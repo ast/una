@@ -7,7 +7,8 @@
 #include <zephyr/sys/atomic.h>
 
 struct power_status {
-	int percent;
+	int percent;       /* see charge() in power.c */
+	int gauge_percent; /* what the gauge itself says */
 	int millivolts;
 	int microamps; /* average; positive while charging */
 	int remaining_mah;

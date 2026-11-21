@@ -7,6 +7,8 @@
  * Libs/Header/Hardware/PCA9420.hpp of una-kernel-public.
  */
 
+#include <stdlib.h>
+
 #include <zephyr/device.h>
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/drivers/rtc.h>
@@ -17,6 +19,7 @@
 #include <zephyr/logging/log_ctrl.h>
 #include <zephyr/pm/pm.h>
 #include <zephyr/pm/policy.h>
+#include <zephyr/settings/settings.h>
 #include <zephyr/shell/shell.h>
 #include <zephyr/sys/byteorder.h>
 
@@ -46,6 +49,89 @@ static int32_t milli(const struct sensor_value *v)
 	return v->val1 * 1000 + v->val2 / 1000;
 }
 
+#define GAUGE_ADDR    0x36
+#define GAUGE_REP_SOC 0x06 /* the gauge's percentage, in 1/256 % */
+#define GAUGE_MIX_CAP 0x0f /* the charge it reckons is in the cell */
+#define GAUGE_QH      0x4d /* its plain coulomb counter */
+
+static int gauge_read(uint8_t reg)
+{
+	uint8_t raw[2] = {0};
+
+	(void)i2c_burst_read(i2c, GAUGE_ADDR, reg, raw, sizeof(raw));
+	return sys_get_le16(raw);
+}
+
+static int gauge_qh(void)
+{
+	return (int16_t)gauge_read(GAUGE_QH);
+}
+
+/*
+ * How full the battery is.
+ *
+ * The gauge's own percentage (RepSOC) is not it: its model of the cell is
+ * full at a lower voltage than the 4.40 V this one is charged to, so it
+ * reckons a full cell at about 108 % and reports 100 until the surplus is
+ * used up, which took over a day on the wrist. Its estimate of the charge
+ * in the cell (MixCap, coulomb counter and voltage combined) has no such
+ * ceiling. So the percentage is that charge against what it was when the
+ * charger last called the cell full, which is remembered; and the gauge's
+ * own figure where it is the lower, towards empty, where it allows for the
+ * load.
+ */
+static uint16_t full_raw; /* MixCap at full, 0.5 mAh a step; 0: not seen yet */
+
+static int power_setting_set(const char *name, size_t len, settings_read_cb read_cb, void *cb_arg)
+{
+	if (settings_name_steq(name, "full", NULL) && len == sizeof(full_raw)) {
+		return read_cb(cb_arg, &full_raw, sizeof(full_raw)) < 0 ? -EIO : 0;
+	}
+	return -ENOENT;
+}
+SETTINGS_STATIC_HANDLER_DEFINE(power, "power", NULL, power_setting_set, NULL, NULL);
+
+/* PCA9420 charger states in which the cell is as full as it gets. */
+#define CHARGER_TOP_OFF 5
+#define CHARGER_DONE    6
+
+static int charge(struct power_status *st)
+{
+	static uint16_t saved_raw;
+	int mix = gauge_read(GAUGE_MIX_CAP);
+	int rep_percent = gauge_read(GAUGE_REP_SOC) >> 8;
+	int full = full_raw;
+
+	if (mix == 0) {
+		return -EIO;
+	}
+	if (saved_raw == 0) {
+		saved_raw = full_raw;
+	}
+	if (st->usb_power &&
+	    (st->charger_state == CHARGER_TOP_OFF || st->charger_state == CHARGER_DONE)) {
+		full = mix;
+		full_raw = mix;
+		/* Kept for a start on battery; not rewritten for a step or two. */
+		if (abs(mix - saved_raw) >= 4) {
+			saved_raw = mix;
+			settings_save_one("power/full", &full_raw, sizeof(full_raw));
+		}
+	} else if (full < mix) {
+		/* Fuller than full was thought to be, or full never seen. */
+		full = mix;
+		if (full_raw != 0) {
+			full_raw = mix;
+		}
+	}
+	st->percent = CLAMP(MIN((mix * 100 + full / 2) / full, rep_percent), 0, 100);
+	/* The gauge counts for a 5 mOhm sense resistor; the watch has 10 mOhm. */
+	st->remaining_mah = mix / 2;
+	st->full_mah = full / 2;
+	st->gauge_percent = rep_percent;
+	return 0;
+}
+
 int power_status(struct power_status *st)
 {
 	struct sensor_value v;
@@ -56,19 +142,11 @@ int power_status(struct power_status *st)
 	if (ret < 0) {
 		return ret;
 	}
-	sensor_channel_get(gauge, SENSOR_CHAN_GAUGE_STATE_OF_CHARGE, &v);
-	st->percent = CLAMP(v.val1, 0, 100);
 	sensor_channel_get(gauge, SENSOR_CHAN_GAUGE_VOLTAGE, &v);
 	st->millivolts = milli(&v);
 	sensor_channel_get(gauge, SENSOR_CHAN_GAUGE_AVG_CURRENT, &v);
 	/* The driver reports mA with the remainder in nA. */
 	st->microamps = v.val1 * 1000 + v.val2 / 1000;
-	sensor_channel_get(gauge, SENSOR_CHAN_GAUGE_REMAINING_CHARGE_CAPACITY, &v);
-	/* The driver assumes a 5 mOhm sense resistor; the watch has 10 mOhm. */
-	st->remaining_mah = milli(&v) / 2;
-	sensor_channel_get(gauge, SENSOR_CHAN_GAUGE_FULL_CHARGE_CAPACITY, &v);
-	st->full_mah = milli(&v) / 2;
-
 	ret = i2c_reg_read_byte(i2c, PMIC_ADDR, PMIC_CHG_STATUS_0, &reg);
 	if (ret < 0) {
 		return ret;
@@ -87,18 +165,7 @@ int power_status(struct power_status *st)
 	}
 	st->charge_limit_ma = (reg & 0x3f) * 5;
 
-	return 0;
-}
-
-#define GAUGE_ADDR 0x36
-#define GAUGE_QH   0x4d
-
-static int gauge_qh(void)
-{
-	uint8_t raw[2] = {0};
-
-	(void)i2c_burst_read(i2c, GAUGE_ADDR, GAUGE_QH, raw, sizeof(raw));
-	return (int16_t)sys_get_le16(raw);
+	return charge(st);
 }
 
 static struct power_status last_status;
@@ -217,14 +284,15 @@ static void telemetry(const struct power_status *st, int32_t mean_ua)
 	(void)rtc_get_time(rtc, &t);
 
 	/*
-	 * cap and qh are there to find out why the percentage stayed at 100
-	 * through a day on battery: the gauge's remaining capacity, and its
-	 * plain coulomb counter (0.5 mAh a step), which no model touches.
+	 * soc is the percentage shown, cap the charge it is made from; rep is
+	 * the gauge's own percentage and qh its plain coulomb counter (0.5 mAh
+	 * a step), to check the first against. See charge().
 	 */
-	LOG_INF("tm %04d-%02d-%02dT%02d:%02d:%02dZ usb=%d soc=%d cap=%d/%d qh=%d mv=%d ua=%d "
+	LOG_INF("tm %04d-%02d-%02dT%02d:%02d:%02dZ usb=%d soc=%d cap=%d/%d rep=%d qh=%d mv=%d ua=%d "
 		"chg=%u stops=%u awake=%u/1000 keys=%ld backlight_ms=%ld",
 		t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec,
-		st->usb_power, st->percent, st->remaining_mah, st->full_mah, gauge_qh(),
+		st->usb_power, st->percent, st->remaining_mah, st->full_mah, st->gauge_percent,
+		gauge_qh(),
 		st->millivolts, mean_ua, st->charger_state,
 		stop_entries - last_stop_entries, awake_permille,
 		(long)atomic_clear(&usage_key_presses), (long)atomic_clear(&usage_backlight_ms));
@@ -318,8 +386,8 @@ static int cmd_status(const struct shell *sh, size_t argc, char **argv)
 		shell_error(sh, "read failed: %d", ret);
 		return ret;
 	}
-	shell_print(sh, "battery: %d %%, %d mV, %d uA, %d of %d mAh", st.percent, st.millivolts,
-		    st.microamps, st.remaining_mah, st.full_mah);
+	shell_print(sh, "battery: %d %% (gauge: %d %%), %d mV, %d uA, %d of %d mAh", st.percent,
+		    st.gauge_percent, st.millivolts, st.microamps, st.remaining_mah, st.full_mah);
 	shell_print(sh, "usb power: %s, charger state %u, limit %u mA",
 		    st.usb_power ? "yes" : "no", st.charger_state, st.charge_limit_ma);
 	return 0;

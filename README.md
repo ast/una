@@ -64,7 +64,9 @@ simulator, smpmgr for firmware upload, plus openocd, probe-rs, tio and clangd.
   on the power lines, and a page each for the electrical system (currents,
   charge, an hour's trend), the MCU, storage, the GPS receiver (satellites
   and their signal strengths) and alerts.
-- Battery gauge and charger status, power-off, Stop mode whenever idle and off
+- Battery gauge and charger status (the percentage is worked out from the
+  gauge's charge estimate: its own figure stays at 100 for the first tenth
+  of a discharge, see `charge()` in `src/power.c`), power-off, Stop mode whenever idle and off
   USB: about 0.85 mA idle, a week on a charge (measured at v0.1.0).
 - Clock from the RTC with a stored UTC offset, set from the computer.
 - Log files on the eMMC with a telemetry line a minute.
@@ -245,9 +247,12 @@ are under `Log/Zephyr/` when the stock firmware shows the drive over USB.
 Once a minute the power thread logs one line:
 
 ```
-power: tm 2026-11-20T10:59:21Z usb=1 soc=99 mv=4400 ua=-1041 chg=6 stops=0 awake=0/1000 keys=0 backlight_ms=0
+power: tm 2026-11-21T19:07:48Z usb=1 soc=100 cap=228/228 rep=100 qh=522 mv=4401 ua=533 chg=6 stops=0 awake=6/1000 keys=0 backlight_ms=5000
 ```
 
+`soc` is the percentage shown and `cap` the charge it is made from, in mAh
+of what a full cell held; `rep` is the gauge's own percentage and `qh` its
+plain coulomb counter (0.5 mAh a step), kept to check the first against.
 `ua` is the mean battery current over the minute (negative = discharging; the
 gauge is only good to a few mA), `stops` the number of Stop-mode entries,
 `awake` the share of the minute the CPU was not idle, `keys` and

@@ -123,11 +123,14 @@ after which it stops answering); a fix outdoors is still to be seen.
 Order from here: the GNSS chip on the watch (LPUART1, 921600 baud, power on PG5, Zephyr's
 `quectel,lc76g` driver), then altitude gain from the MS5837.
 
-Open: on 20-21 Nov the gauge reported 99-100 % through 22.3 h on battery at
-a mean of 1.01 mA (22.5 mAh, so about 89 % was right). The telemetry line
-now also carries the gauge's remaining capacity (`cap=`) and its coulomb
-counter (`qh=`, 0.5 mAh a step), to tell after the next day of wear whether
-the capacity falls and only the percentage sticks.
+The gauge reported 99-100 % through 22.3 h on battery on 20-21 Nov (22.5 mAh
+drawn, so about 89 % was right). Its registers on the charger: MixSOC and
+VFSOC at 108 %, RepSOC clamped to 100: the EZ model is full at a lower
+voltage than the 4.40 V this cell is charged to, and at 1 mA the gauge
+follows its voltage model. The percentage shown is now MixCap against
+MixCap when the charger last reported full (`charge()` in `src/power.c`).
+Still to be confirmed by a day of wear: the telemetry line carries `soc`,
+`cap`, `rep` and `qh` for that.
 
 ### 2. Board services
 - RTC time in UTC with time zone; `date` shell command.
