@@ -9,13 +9,13 @@ target_sources(app PRIVATE
   src/alert.c
   src/clock.c
   src/dial.c
+  src/draw.c
   src/face.c
   src/main.c
-  src/menu.c
   src/screenshot.c
   src/settings.c
-  src/status.c
   src/stopwatch.c
+  src/systems.c
   src/timer.c
   src/ui.c
 )

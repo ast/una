@@ -16,7 +16,13 @@ enum ui_key {
 
 /*
  * A screen. All three run in the main thread, the only one that may call
- * LVGL. Holding BACK returns to the watch face from anywhere and is not
+ * LVGL.
+ *
+ * The buttons mean the same everywhere. UP and DOWN go to what is beside
+ * this: the next page in the ring, row in a list, value of a field. SELECT
+ * does what the page does, or goes in; held, it goes in to change what the
+ * page is set to. BACK goes out one level and, from a page in the ring, to
+ * the watch face. Holding BACK returns to the face from anywhere and is not
  * passed on.
  */
 struct ui_screen {
@@ -25,10 +31,17 @@ struct ui_screen {
 	void (*enter)(void);
 	/* Bring the widgets up to date. Returns the ms until it is due again. */
 	uint32_t (*update)(void);
-	void (*key)(enum ui_key key, bool held);
+	/*
+	 * False for a key the screen has no use for, which then does what it
+	 * does everywhere: UP and DOWN move in the ring, BACK goes out.
+	 */
+	bool (*key)(enum ui_key key, bool held);
 };
 
-/* Screen stack; from enter/update/key only. */
+/*
+ * The ring's pages lie under a stack of the screens gone into from them.
+ * From enter/update/key only.
+ */
 void ui_push(const struct ui_screen *screen);
 void ui_pop(void);
 void ui_home(void);
@@ -56,6 +69,7 @@ struct ui_list {
 	lv_obj_t *rows[UI_LIST_ROWS];
 	int count;
 	int selected;
+	bool quiet; /* shown without the selection */
 };
 
 void ui_list_create(struct ui_list *list, const char *title, int count);
@@ -67,14 +81,13 @@ bool ui_list_key(struct ui_list *list, enum ui_key key);
 /* A label in one of the three fonts, centred on the screen plus an offset. */
 lv_obj_t *ui_label(const lv_font_t *font, uint32_t rgb, int y);
 
-/* "Question?" with SELECT for yes; yes() runs after the screen has closed. */
-void ui_confirm(const char *question, void (*yes)(void));
+/* The small title at the top of a page. */
+void ui_title(const char *title);
 
 extern const struct ui_screen face_screen;
 extern const struct ui_screen face_chooser_screen;
-extern const struct ui_screen status_screen;
-extern const struct ui_screen menu_screen;
 extern const struct ui_screen settings_screen;
+extern const struct ui_screen systems_screen;
 extern const struct ui_screen stopwatch_screen;
 extern const struct ui_screen timer_screen;
 extern const struct ui_screen alarm_screen;

@@ -16,7 +16,7 @@ static lv_obj_t *hint_label;
 
 static void stopwatch_enter(void)
 {
-	lv_label_set_text(ui_label(&lv_font_montserrat_14, 0xaaaaaa, -92), "Stopwatch");
+	ui_title("STOPWATCH");
 	time_label = ui_label(&lv_font_montserrat_48, 0xffffff, -14);
 	fraction_label = ui_label(&lv_font_montserrat_20, 0xffffff, 28);
 	hint_label = ui_label(&lv_font_montserrat_14, 0xaaaaaa, 72);
@@ -35,32 +35,35 @@ static uint32_t stopwatch_update(void)
 	}
 	if (running) {
 		lv_label_set_text(fraction_label, "");
-		lv_label_set_text(hint_label, "top right: stop");
+		lv_label_set_text(hint_label, "");
+		lv_obj_set_style_text_color(time_label, lv_color_hex(0x00ff00), 0);
 		return 1000 - ms % 1000;
 	}
 	lv_label_set_text_fmt(fraction_label, ".%02d", (int)(ms % 1000 / 10));
-	lv_label_set_text(hint_label, ms == 0 ? "top right: start"
-					      : "top right: start\nbottom left: reset");
+	lv_obj_set_style_text_color(time_label, lv_color_white(), 0);
+	lv_label_set_text(hint_label, ms == 0 ? "" : "hold: reset");
 	return UINT32_MAX;
 }
 
-static void stopwatch_key(enum ui_key key, bool held)
+/* SELECT starts and stops; held, it resets a stopped watch. */
+static bool stopwatch_key(enum ui_key key, bool held)
 {
-	if (held) {
-		return;
+	if (key != UI_KEY_SELECT) {
+		return false;
 	}
-	if (key == UI_KEY_SELECT) {
+	if (held) {
+		if (!running) {
+			banked_ms = 0;
+		}
+	} else {
 		if (running) {
 			banked_ms += k_uptime_get() - started_at;
 		} else {
 			started_at = k_uptime_get();
 		}
 		running = !running;
-	} else if (key == UI_KEY_DOWN && !running) {
-		banked_ms = 0;
-	} else if (key == UI_KEY_BACK) {
-		ui_pop();
 	}
+	return true;
 }
 
 const struct ui_screen stopwatch_screen = {

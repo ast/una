@@ -11,6 +11,7 @@
 
 #include "alert.h"
 #include "power.h"
+#include "storage.h"
 #include "ui.h"
 
 LOG_MODULE_REGISTER(sim, LOG_LEVEL_INF);
@@ -49,6 +50,33 @@ void power_last(struct power_status *st)
 	*st = status;
 }
 
+void power_stats(struct power_stats *stats)
+{
+	*stats = (struct power_stats){
+		.mean_ua = status.usb_power ? 30000 : -1010,
+		.awake_permille = 1,
+		.stops_per_min = status.usb_power ? 0 : 134,
+		.stop_locked = status.usb_power,
+	};
+}
+
+/* An hour that began on the charger. */
+int power_trend(int32_t *microamps)
+{
+	for (int i = 0; i < POWER_TREND_N; i++) {
+		microamps[i] = i < 15 ? 40000 - i * 2000 : -800 - (i * 37 % 11) * 60;
+	}
+	return POWER_TREND_N;
+}
+
+bool storage_info(struct storage_info *info, bool measure)
+{
+	ARG_UNUSED(measure);
+
+	*info = (struct storage_info){.total_mb = 7400, .free_mb = 5100};
+	return true;
+}
+
 int power_off(void)
 {
 	LOG_INF("power off");
@@ -65,6 +93,7 @@ static int cmd_battery(const struct shell *sh, size_t argc, char **argv)
 	status.remaining_mah = status.full_mah * status.percent / 100;
 	status.millivolts = 3400 + 10 * status.percent;
 	status.microamps = status.usb_power ? 50000 : -1000;
+	status.charge_limit_ma = 100;
 	ui_refresh();
 	return 0;
 }

@@ -1,73 +1,31 @@
 /*
- * Settings, and the two things kept with them: power off and "about".
+ * Settings, and power off. The page shows the list; SELECT goes in, and
+ * then changes the row it is on.
  */
 
 #include <stdio.h>
 
 #include <zephyr/kernel.h>
 
-#include <zephyr/app_version.h>
-
 #include "alert.h"
-#include "face.h"
 #include "power.h"
 #include "ui.h"
 
-/* About */
-
-static void about_enter(void)
-{
-	lv_label_set_text(ui_label(&lv_font_montserrat_14, 0xaaaaaa, -92), "About");
-	lv_label_set_text(ui_label(&lv_font_montserrat_20, 0xffffff, -10),
-			  "UNA Watch\nZephyr " APP_VERSION_STRING);
-	lv_label_set_text(ui_label(&lv_font_montserrat_14, 0xaaaaaa, 50), "built " __DATE__);
-}
-
-static uint32_t about_update(void)
-{
-	return UINT32_MAX;
-}
-
-static void about_key(enum ui_key key, bool held)
-{
-	ARG_UNUSED(key);
-	ARG_UNUSED(held);
-
-	ui_pop();
-}
-
-static const struct ui_screen about_screen = {
-	.name = "about",
-	.enter = about_enter,
-	.update = about_update,
-	.key = about_key,
-};
-
-/* The list */
-
 enum {
-	ROW_FACE,
-	ROW_DIAL,
 	ROW_BACKLIGHT,
 	ROW_SOUND,
 	ROW_VIBRATION,
 	ROW_POWER_OFF,
-	ROW_ABOUT,
 	ROW_COUNT,
 };
 
-static struct ui_list list;
+static struct ui_list list = {.quiet = true};
 
 static const char *row_text(int index)
 {
 	static char text[24];
 
 	switch (index) {
-	case ROW_FACE:
-		snprintf(text, sizeof(text), "Face: %s", face_name());
-		return text;
-	case ROW_DIAL:
-		return face_light() ? "Dial white" : "Dial black";
 	case ROW_BACKLIGHT:
 		if (ui_backlight_s() == 0) {
 			return "Backlight off";
@@ -78,22 +36,16 @@ static const char *row_text(int index)
 		return alert_sound() ? "Sound on" : "Sound off";
 	case ROW_VIBRATION:
 		return alert_vibration() ? "Vibration on" : "Vibration off";
-	case ROW_POWER_OFF:
-		return "Power off";
 	default:
-		return "About";
+		/* Asked for by holding, in place of a question afterwards. */
+		return "Hold: power off";
 	}
-}
-
-static void do_power_off(void)
-{
-	/* Does not return on battery; on USB power the PMIC starts again. */
-	power_off();
 }
 
 static void settings_enter(void)
 {
-	ui_list_create(&list, "Settings", ROW_COUNT);
+	list.quiet = true;
+	ui_list_create(&list, "SETTINGS", ROW_COUNT);
 }
 
 static uint32_t settings_update(void)
@@ -102,33 +54,45 @@ static uint32_t settings_update(void)
 	return UINT32_MAX;
 }
 
-static void settings_key(enum ui_key key, bool held)
+static void next_backlight(void)
 {
-	static const int backlight_choices[] = {3, 5, 10, 20, 0};
+	static const int choices[] = {3, 5, 10, 20, 0};
 
-	if (held || ui_list_key(&list, key)) {
-		return;
+	for (int i = 0; i < ARRAY_SIZE(choices); i++) {
+		if (choices[i] == ui_backlight_s()) {
+			ui_set_backlight_s(choices[(i + 1) % ARRAY_SIZE(choices)]);
+			return;
+		}
+	}
+	ui_set_backlight_s(choices[1]);
+}
+
+static bool settings_key(enum ui_key key, bool held)
+{
+	if (list.quiet) {
+		if (key != UI_KEY_SELECT) {
+			return false;
+		}
+		list.quiet = false;
+		return true;
 	}
 	if (key == UI_KEY_BACK) {
-		ui_pop();
-		return;
+		list.quiet = true;
+		return true;
+	}
+	if (held) {
+		if (key == UI_KEY_SELECT && list.selected == ROW_POWER_OFF) {
+			/* Does not return on battery; on USB power the PMIC starts again. */
+			power_off();
+		}
+		return true;
+	}
+	if (ui_list_key(&list, key)) {
+		return true;
 	}
 	switch (list.selected) {
-	case ROW_FACE:
-		ui_push(&face_chooser_screen);
-		break;
-	case ROW_DIAL:
-		face_set_light(!face_light());
-		break;
 	case ROW_BACKLIGHT:
-		for (int i = 0; i < ARRAY_SIZE(backlight_choices); i++) {
-			if (backlight_choices[i] == ui_backlight_s()) {
-				ui_set_backlight_s(
-					backlight_choices[(i + 1) % ARRAY_SIZE(backlight_choices)]);
-				return;
-			}
-		}
-		ui_set_backlight_s(backlight_choices[1]);
+		next_backlight();
 		break;
 	case ROW_SOUND:
 		alert_set_sound(!alert_sound());
@@ -138,13 +102,8 @@ static void settings_key(enum ui_key key, bool held)
 		alert_set_vibration(!alert_vibration());
 		alert_blip();
 		break;
-	case ROW_POWER_OFF:
-		ui_confirm("Power off?", do_power_off);
-		break;
-	case ROW_ABOUT:
-		ui_push(&about_screen);
-		break;
 	}
+	return true;
 }
 
 const struct ui_screen settings_screen = {

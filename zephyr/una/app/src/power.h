@@ -22,6 +22,19 @@ int power_status(struct power_status *st);
 /* The power thread's latest reading, without touching the bus. */
 void power_last(struct power_status *st);
 
+struct power_stats {
+	int mean_ua;                /* battery current over the last hour, or what there is of it */
+	int awake_permille;         /* of the CPU, in the last whole minute */
+	unsigned int stops_per_min; /* entries into Stop mode, in that minute */
+	bool stop_locked;           /* something keeps the SoC out of Stop mode */
+};
+
+void power_stats(struct power_stats *stats);
+
+/* The mean current of each of the last hour's minutes, oldest first. Returns how many. */
+#define POWER_TREND_N 60
+int power_trend(int32_t *microamps);
+
 /* Does not return when it works and there is no USB power. */
 int power_off(void);
 

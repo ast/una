@@ -105,6 +105,26 @@ the watch; that the buzzer and motor are heard and felt is still to be
 confirmed. Next: Bluetooth time and notifications through Gadgetbridge
 (phase 5).
 
+### Status after v0.3.0 (21 Nov 2026)
+
+The navigation is no longer "as stock" (phase 3): the pages lie in one ring
+with no menu, and the buttons mean the same everywhere (README, Buttons and
+screens). Activities are not apps either (phase 6): there is to be one
+recorder, started with one press, that writes a FIT file whatever the
+activity; what it was is a label chosen afterwards. System pages show the
+subsystems as an aircraft's displays do, and get a page per subsystem as
+they arrive (GNSS, sensors, radio).
+
+Order from here: the recorder in the simulator (FIT writer, emulated GNSS),
+the GNSS chip on the watch (LPUART1, 921600 baud, power on PG5, Zephyr's
+`quectel,lc76g` driver), then altitude gain from the MS5837.
+
+Open: on 20-21 Nov the gauge reported 99-100 % through 22.3 h on battery at
+a mean of 1.01 mA (22.5 mAh, so about 89 % was right). The telemetry line
+now also carries the gauge's remaining capacity (`cap=`) and its coulomb
+counter (`qh=`, 0.5 mAh a step), to tell after the next day of wear whether
+the capacity falls and only the percentage sticks.
+
 ### 2. Board services
 - RTC time in UTC with time zone; `date` shell command.
 - Buttons: SW1-SW4 named UP/SELECT/DOWN/BACK as stock, long-press and hold

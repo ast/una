@@ -14,6 +14,7 @@
 
 static int32_t minutes = 5;
 static bool running;
+static bool editing; /* inside: UP and DOWN set the minutes */
 static int64_t ends_at;
 
 static lv_obj_t *time_label;
@@ -30,7 +31,8 @@ static K_WORK_DELAYABLE_DEFINE(done_work, done);
 
 static void timer_enter(void)
 {
-	lv_label_set_text(ui_label(&lv_font_montserrat_14, 0xaaaaaa, -92), "Timer");
+	ui_title("TIMER");
+	editing = false;
 	time_label = ui_label(&lv_font_montserrat_48, 0xffffff, -14);
 	hint_label = ui_label(&lv_font_montserrat_14, 0xaaaaaa, 60);
 }
@@ -42,7 +44,9 @@ static uint32_t timer_update(void)
 
 	if (!running || left_ms <= 0) {
 		lv_label_set_text_fmt(time_label, "%02d:00", (int)minutes);
-		lv_label_set_text(hint_label, "left: more, less\ntop right: start");
+		lv_obj_set_style_text_color(time_label,
+					    lv_color_hex(editing ? 0x00ffff : 0xffffff), 0);
+		lv_label_set_text(hint_label, editing ? "" : "hold: set");
 		/* Running with nothing left: about to ring. */
 		return running ? 100 : UINT32_MAX;
 	}
@@ -53,29 +57,40 @@ static uint32_t timer_update(void)
 	} else {
 		lv_label_set_text_fmt(time_label, "%02d:%02d", s / 60, s % 60);
 	}
-	lv_label_set_text(hint_label, "top right: stop");
+	lv_obj_set_style_text_color(time_label, lv_color_hex(0x00ff00), 0);
+	lv_label_set_text(hint_label, "");
 	return (left_ms - 1) % 1000 + 1;
 }
 
-static void timer_key(enum ui_key key, bool held)
+/* SELECT starts and stops; held, it goes in to set the minutes. */
+static bool timer_key(enum ui_key key, bool held)
 {
-	if (key == UI_KEY_BACK) {
-		ui_pop();
-	} else if (key == UI_KEY_SELECT && !held) {
-		if (running) {
-			k_work_cancel_delayable(&done_work);
-		} else {
-			ends_at = k_uptime_get() + minutes * 60000;
-			k_work_reschedule(&done_work, K_TIMEOUT_ABS_MS(ends_at));
+	if (editing) {
+		if (key == UI_KEY_UP || key == UI_KEY_DOWN) {
+			/* Held: tens. */
+			int step = (held ? 10 : 1) * (key == UI_KEY_UP ? 1 : -1);
+
+			minutes = CLAMP(minutes + step, 1, MAX_MINUTES);
+		} else if (!held) {
+			editing = false;
 			settings_save_one("timer/minutes", &minutes, sizeof(minutes));
 		}
-		running = !running;
-	} else if (!running && (key == UI_KEY_UP || key == UI_KEY_DOWN)) {
-		/* Held: tens. */
-		int step = (held ? 10 : 1) * (key == UI_KEY_UP ? 1 : -1);
-
-		minutes = CLAMP(minutes + step, 1, MAX_MINUTES);
+		return true;
 	}
+	if (key != UI_KEY_SELECT) {
+		return false;
+	}
+	if (held) {
+		editing = !running;
+	} else if (running) {
+		k_work_cancel_delayable(&done_work);
+		running = false;
+	} else {
+		ends_at = k_uptime_get() + minutes * 60000;
+		k_work_reschedule(&done_work, K_TIMEOUT_ABS_MS(ends_at));
+		running = true;
+	}
+	return true;
 }
 
 static int timer_setting_set(const char *name, size_t len, settings_read_cb read_cb, void *cb_arg)

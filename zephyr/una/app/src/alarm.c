@@ -87,82 +87,87 @@ static int alarm_init(void)
 }
 SYS_INIT(alarm_init, APPLICATION, 97);
 
-/* The screen: SELECT steps through on/off, hour and minute; UP and DOWN change. */
+/*
+ * The page: SELECT turns the alarm on and off; held, it goes in to set the
+ * hour, then the minute.
+ */
 
 enum field {
-	FIELD_ON,
+	FIELD_NONE, /* not inside */
 	FIELD_HOUR,
 	FIELD_MINUTE,
-	FIELD_COUNT,
 };
 
 static enum field field;
 static lv_obj_t *hour_label;
+static lv_obj_t *colon_label;
 static lv_obj_t *minute_label;
 static lv_obj_t *on_label;
+static lv_obj_t *hint_label;
 
 static void alarm_enter(void)
 {
-	lv_label_set_text(ui_label(&lv_font_montserrat_14, 0xaaaaaa, -92), "Alarm");
+	ui_title("ALARM");
 	hour_label = ui_label(&lv_font_montserrat_48, 0xffffff, -14);
 	lv_obj_align(hour_label, LV_ALIGN_CENTER, -40, -14);
-	lv_label_set_text(ui_label(&lv_font_montserrat_48, 0xffffff, -18), ":");
+	colon_label = ui_label(&lv_font_montserrat_48, 0xffffff, -18);
+	lv_label_set_text(colon_label, ":");
 	minute_label = ui_label(&lv_font_montserrat_48, 0xffffff, -14);
 	lv_obj_align(minute_label, LV_ALIGN_CENTER, 40, -14);
 	on_label = ui_label(&lv_font_montserrat_20, 0xffffff, 32);
-	lv_label_set_text(ui_label(&lv_font_montserrat_14, 0xaaaaaa, 72),
-			  "left: change\ntop right: next");
-	field = FIELD_ON;
+	hint_label = ui_label(&lv_font_montserrat_14, 0xaaaaaa, 72);
+	field = FIELD_NONE;
 }
 
 static uint32_t alarm_update(void)
 {
-	const lv_color_t chosen = lv_color_hex(0xffff00);
-	const lv_color_t other = lv_color_white();
+	/* An alarm that is off is grey; the field being set is cyan. */
+	const lv_color_t plain = lv_color_hex(alarm.on ? 0xffffff : 0x555555);
+	const lv_color_t chosen = lv_color_hex(0x00ffff);
 
 	lv_label_set_text_fmt(hour_label, "%02d", alarm.hour);
 	lv_label_set_text_fmt(minute_label, "%02d", alarm.minute);
-	lv_label_set_text(on_label, alarm.on ? "on" : "off");
-	lv_obj_set_style_text_color(on_label, field == FIELD_ON ? chosen : other, 0);
-	lv_obj_set_style_text_color(hour_label, field == FIELD_HOUR ? chosen : other, 0);
-	lv_obj_set_style_text_color(minute_label, field == FIELD_MINUTE ? chosen : other, 0);
+	lv_label_set_text(on_label, alarm.on ? "ON" : "OFF");
+	lv_obj_set_style_text_color(on_label, lv_color_hex(alarm.on ? 0x00ff00 : 0x555555), 0);
+	lv_obj_set_style_text_color(colon_label, plain, 0);
+	lv_obj_set_style_text_color(hour_label, field == FIELD_HOUR ? chosen : plain, 0);
+	lv_obj_set_style_text_color(minute_label, field == FIELD_MINUTE ? chosen : plain, 0);
+	lv_label_set_text(hint_label, field == FIELD_NONE ? "hold: set" : "");
 	return UINT32_MAX;
 }
 
-static void alarm_key(enum ui_key key, bool held)
+static bool alarm_key(enum ui_key key, bool held)
 {
 	int dir = key == UI_KEY_UP ? 1 : -1;
 
-	if (key == UI_KEY_BACK) {
-		ui_pop();
-		return;
-	}
-	if (key == UI_KEY_SELECT) {
-		if (!held) {
-			field = (field + 1) % FIELD_COUNT;
+	if (field == FIELD_NONE) {
+		if (key != UI_KEY_SELECT) {
+			return false;
 		}
-		return;
-	}
-	switch (field) {
-	case FIELD_ON:
-		alarm.on = !alarm.on;
-		break;
-	case FIELD_HOUR:
-		alarm.hour = (alarm.hour + 24 + dir) % 24;
-		break;
-	default:
-		/* Fives, to the next multiple; held: single minutes. */
 		if (held) {
-			alarm.minute = (alarm.minute + 60 + dir) % 60;
-		} else if (dir > 0) {
-			alarm.minute = (alarm.minute / 5 * 5 + 5) % 60;
-		} else {
-			alarm.minute = ((alarm.minute + 4) / 5 * 5 + 55) % 60;
+			field = FIELD_HOUR;
+			return true;
 		}
-		break;
+		alarm.on = !alarm.on;
+	} else if (key == UI_KEY_SELECT || key == UI_KEY_BACK) {
+		if (!held) {
+			field = key == UI_KEY_SELECT && field == FIELD_HOUR ? FIELD_MINUTE
+									     : FIELD_NONE;
+		}
+		return true;
+	} else if (field == FIELD_HOUR) {
+		alarm.hour = (alarm.hour + 24 + dir) % 24;
+	} else if (held) {
+		/* Fives, to the next multiple; held: single minutes. */
+		alarm.minute = (alarm.minute + 60 + dir) % 60;
+	} else if (dir > 0) {
+		alarm.minute = (alarm.minute / 5 * 5 + 5) % 60;
+	} else {
+		alarm.minute = ((alarm.minute + 4) / 5 * 5 + 55) % 60;
 	}
 	settings_save_one("alarm/daily", &alarm, sizeof(alarm));
 	schedule();
+	return true;
 }
 
 const struct ui_screen alarm_screen = {

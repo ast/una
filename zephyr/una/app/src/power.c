@@ -18,6 +18,7 @@
 #include <zephyr/pm/pm.h>
 #include <zephyr/pm/policy.h>
 #include <zephyr/shell/shell.h>
+#include <zephyr/sys/byteorder.h>
 
 #include "power.h"
 
@@ -89,6 +90,17 @@ int power_status(struct power_status *st)
 	return 0;
 }
 
+#define GAUGE_ADDR 0x36
+#define GAUGE_QH   0x4d
+
+static int gauge_qh(void)
+{
+	uint8_t raw[2] = {0};
+
+	(void)i2c_burst_read(i2c, GAUGE_ADDR, GAUGE_QH, raw, sizeof(raw));
+	return (int16_t)sys_get_le16(raw);
+}
+
 static struct power_status last_status;
 static struct k_spinlock last_lock;
 
@@ -138,6 +150,44 @@ struct sample {
 static struct sample history[HISTORY_N];
 static uint32_t history_count;
 
+/* Of the last whole minute; see telemetry(). */
+static uint32_t minute_awake_permille;
+static uint32_t minute_stops;
+
+#define PER_MINUTE (60 / POLL_S)
+
+int power_trend(int32_t *microamps)
+{
+	uint32_t count = history_count;
+	int minutes = MIN(count, HISTORY_N) / PER_MINUTE;
+
+	for (int m = 0; m < minutes; m++) {
+		uint32_t first = count - (minutes - m) * PER_MINUTE;
+		int64_t sum = 0;
+
+		for (int i = 0; i < PER_MINUTE; i++) {
+			sum += history[(first + i) % HISTORY_N].microamps;
+		}
+		microamps[m] = sum / PER_MINUTE;
+	}
+	return minutes;
+}
+
+void power_stats(struct power_stats *stats)
+{
+	uint32_t count = history_count;
+	uint32_t n = MIN(count, HISTORY_N);
+	int64_t sum = 0;
+
+	for (uint32_t i = count - n; i < count; i++) {
+		sum += history[i % HISTORY_N].microamps;
+	}
+	stats->mean_ua = n > 0 ? sum / n : 0;
+	stats->awake_permille = minute_awake_permille;
+	stats->stops_per_min = minute_stops;
+	stats->stop_locked = pm_policy_state_lock_is_active(PM_STATE_SUSPEND_TO_IDLE, 3);
+}
+
 /*
  * One line a minute through the ordinary log. The file-system log backend
  * keeps it on the eMMC (/USER:/Log/Zephyr), which is what makes battery life
@@ -166,12 +216,20 @@ static void telemetry(const struct power_status *st, int32_t mean_ua)
 	}
 	(void)rtc_get_time(rtc, &t);
 
-	LOG_INF("tm %04d-%02d-%02dT%02d:%02d:%02dZ usb=%d soc=%d mv=%d ua=%d chg=%u "
-		"stops=%u awake=%u/1000 keys=%ld backlight_ms=%ld",
+	/*
+	 * cap and qh are there to find out why the percentage stayed at 100
+	 * through a day on battery: the gauge's remaining capacity, and its
+	 * plain coulomb counter (0.5 mAh a step), which no model touches.
+	 */
+	LOG_INF("tm %04d-%02d-%02dT%02d:%02d:%02dZ usb=%d soc=%d cap=%d/%d qh=%d mv=%d ua=%d "
+		"chg=%u stops=%u awake=%u/1000 keys=%ld backlight_ms=%ld",
 		t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec,
-		st->usb_power, st->percent, st->millivolts, mean_ua, st->charger_state,
+		st->usb_power, st->percent, st->remaining_mah, st->full_mah, gauge_qh(),
+		st->millivolts, mean_ua, st->charger_state,
 		stop_entries - last_stop_entries, awake_permille,
 		(long)atomic_clear(&usage_key_presses), (long)atomic_clear(&usage_backlight_ms));
+	minute_awake_permille = awake_permille;
+	minute_stops = stop_entries - last_stop_entries;
 	last_stop_entries = stop_entries;
 }
 

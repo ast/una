@@ -144,16 +144,16 @@ static uint32_t face_update(void)
 	return set ? (60 - now.tm_sec) * 1000 : 60000;
 }
 
-static void face_key(enum ui_key key, bool held)
+/* Going in is choosing the face. */
+static bool face_key(enum ui_key key, bool held)
 {
-	if (held) {
-		return;
+	ARG_UNUSED(held);
+
+	if (key != UI_KEY_SELECT) {
+		return false;
 	}
-	if (key == UI_KEY_SELECT) {
-		ui_push(&menu_screen);
-	} else if (key == UI_KEY_UP || key == UI_KEY_DOWN) {
-		ui_push(&status_screen);
-	}
+	ui_push(&face_chooser_screen);
+	return true;
 }
 
 const struct ui_screen face_screen = {
@@ -163,7 +163,10 @@ const struct ui_screen face_screen = {
 	.key = face_key,
 };
 
-/* The chooser: the face itself, with its name; UP and DOWN go through them. */
+/*
+ * The chooser: the face itself, with its name. UP and DOWN go through the
+ * faces, SELECT turns a dial white or black.
+ */
 
 static lv_obj_t *name_label;
 
@@ -180,11 +183,15 @@ static void chooser_enter(void)
 
 static uint32_t chooser_update(void)
 {
-	lv_label_set_text(name_label, face_name());
+	if (face == 0) {
+		lv_label_set_text(name_label, face_name());
+	} else {
+		lv_label_set_text_fmt(name_label, "%s %s", face_name(), light ? "white" : "black");
+	}
 	return face_update();
 }
 
-static void chooser_key(enum ui_key key, bool held)
+static bool chooser_key(enum ui_key key, bool held)
 {
 	if (key == UI_KEY_UP || key == UI_KEY_DOWN) {
 		face = (face + FACE_COUNT + (key == UI_KEY_DOWN ? 1 : -1)) % FACE_COUNT;
@@ -192,9 +199,13 @@ static void chooser_key(enum ui_key key, bool held)
 		/* Another face is other widgets. */
 		lv_obj_clean(lv_screen_active());
 		chooser_enter();
-	} else if (!held) {
-		ui_pop();
+		return true;
 	}
+	if (key == UI_KEY_SELECT && !held) {
+		face_set_light(!light);
+		return true;
+	}
+	return false;
 }
 
 const struct ui_screen face_chooser_screen = {

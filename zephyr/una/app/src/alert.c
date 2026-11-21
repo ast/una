@@ -90,13 +90,14 @@ static uint32_t ring_update(void)
 	return UINT32_MAX;
 }
 
-static void ring_key(enum ui_key key, bool held)
+static bool ring_key(enum ui_key key, bool held)
 {
 	ARG_UNUSED(key);
 	ARG_UNUSED(held);
 
 	alert_stop();
 	ui_pop();
+	return true;
 }
 
 static const struct ui_screen ring_screen = {

@@ -6,6 +6,8 @@
  * next message or the next thing to draw, so the SoC can stay in Stop mode.
  */
 
+#include <string.h>
+
 #include <zephyr/drivers/display.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/input/input.h>
@@ -31,6 +33,7 @@ enum event_type {
 	EVENT_REFRESH,
 	EVENT_SHOW,
 	EVENT_RELOAD,
+	EVENT_PAGE, /* go to this page of the ring */
 };
 
 struct event {
@@ -122,14 +125,52 @@ SETTINGS_STATIC_HANDLER_DEFINE(ui, "ui", NULL, ui_setting_set, NULL, NULL);
 
 /* Screens */
 
+/* The ring: DOWN from the face goes through it in this order, UP in the other. */
+static const struct ui_screen *const ring[] = {
+	&face_screen,  &stopwatch_screen, &timer_screen,
+	&alarm_screen, &settings_screen,  &systems_screen,
+};
+static int ring_pos;
+
 static const struct ui_screen *stack[6] = {&face_screen};
 static int depth = 1;
 static uint32_t loops;
+
+/* Where in the ring this is: a column of dots at the left edge. */
+static void ring_dots(void)
+{
+	const int pitch = 9;
+
+	for (int i = 0; i < ARRAY_SIZE(ring); i++) {
+		lv_obj_t *dot = lv_obj_create(lv_screen_active());
+		int size = i == ring_pos ? 6 : 4;
+
+		lv_obj_remove_style_all(dot);
+		lv_obj_set_size(dot, size, size);
+		lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+		lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
+		lv_obj_set_style_bg_color(dot, lv_color_hex(i == ring_pos ? 0xffffff : 0x555555),
+					  0);
+		lv_obj_align(dot, LV_ALIGN_LEFT_MID, 14 - size / 2,
+			     (2 * i - (int)ARRAY_SIZE(ring) + 1) * pitch / 2);
+	}
+}
 
 static void show_top(void)
 {
 	lv_obj_clean(lv_screen_active());
 	stack[depth - 1]->enter();
+	if (depth == 1 && ring_pos != 0) {
+		ring_dots();
+	}
+}
+
+static void ring_go(int pos)
+{
+	ring_pos = (pos + ARRAY_SIZE(ring)) % ARRAY_SIZE(ring);
+	stack[0] = ring[ring_pos];
+	depth = 1;
+	show_top();
 }
 
 void ui_push(const struct ui_screen *screen)
@@ -152,9 +193,27 @@ void ui_pop(void)
 
 void ui_home(void)
 {
-	if (depth > 1) {
-		depth = 1;
-		show_top();
+	if (depth > 1 || ring_pos != 0) {
+		ring_go(0);
+	}
+}
+
+/* What a key does when the screen has no use for it. */
+static void default_key(enum ui_key key, bool held)
+{
+	if (held) {
+		return;
+	}
+	if (key == UI_KEY_BACK) {
+		if (depth > 1) {
+			ui_pop();
+		} else {
+			ui_home();
+		}
+	} else if (depth == 1 && key == UI_KEY_UP) {
+		ring_go(ring_pos - 1);
+	} else if (depth == 1 && key == UI_KEY_DOWN) {
+		ring_go(ring_pos + 1);
 	}
 }
 
@@ -221,8 +280,14 @@ void ui_run(void)
 			} else if (ev.type == EVENT_KEY) {
 				if (ev.key == UI_KEY_BACK && ev.held) {
 					ui_home();
-				} else {
-					stack[depth - 1]->key(ev.key, ev.held);
+				} else if (!stack[depth - 1]->key(ev.key, ev.held)) {
+					default_key(ev.key, ev.held);
+				}
+			} else if (ev.type == EVENT_PAGE) {
+				for (int i = 0; i < ARRAY_SIZE(ring); i++) {
+					if (ring[i] == ev.screen) {
+						ring_go(i);
+					}
 				}
 			}
 		} while (k_msgq_get(&events, &ev, K_NO_WAIT) == 0);
@@ -245,6 +310,11 @@ lv_obj_t *ui_label(const lv_font_t *font, uint32_t rgb, int y)
 	return label;
 }
 
+void ui_title(const char *title)
+{
+	lv_label_set_text(ui_label(&lv_font_montserrat_14, 0xaaaaaa, -92), title);
+}
+
 #define LIST_ROW_PITCH 32
 
 void ui_list_create(struct ui_list *list, const char *title, int count)
@@ -252,7 +322,7 @@ void ui_list_create(struct ui_list *list, const char *title, int count)
 	/* A short list sits in the middle of the screen. */
 	int first_y = 10 - (MIN(count, UI_LIST_ROWS) - 1) * LIST_ROW_PITCH / 2;
 
-	lv_label_set_text(ui_label(&lv_font_montserrat_14, 0xaaaaaa, -92), title);
+	ui_title(title);
 
 	for (int i = 0; i < UI_LIST_ROWS; i++) {
 		lv_obj_t *row = ui_label(&lv_font_montserrat_20, 0xffffff, first_y + i * LIST_ROW_PITCH);
@@ -276,7 +346,7 @@ void ui_list_show(struct ui_list *list, const char *(*text)(int index))
 	for (int i = 0; i < UI_LIST_ROWS; i++) {
 		lv_obj_t *row = list->rows[i];
 		int index = top + i;
-		bool selected = index == list->selected;
+		bool selected = index == list->selected && !list->quiet;
 
 		lv_label_set_text(row, index < list->count ? text(index) : "");
 		lv_obj_set_style_bg_opa(row, selected ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
@@ -296,51 +366,25 @@ bool ui_list_key(struct ui_list *list, enum ui_key key)
 	return true;
 }
 
-/* Confirmation */
-
-static const char *confirm_question;
-static void (*confirm_yes)(void);
-
-static void confirm_enter(void)
-{
-	lv_label_set_text(ui_label(&lv_font_montserrat_20, 0xffffff, -20), confirm_question);
-	lv_label_set_text(ui_label(&lv_font_montserrat_14, 0xaaaaaa, 40),
-			  "top right: yes\nbottom right: no");
-}
-
-static uint32_t confirm_update(void)
-{
-	return UINT32_MAX;
-}
-
-static void confirm_key(enum ui_key key, bool held)
-{
-	if (key == UI_KEY_SELECT && !held) {
-		ui_pop();
-		confirm_yes();
-	} else if (key == UI_KEY_BACK) {
-		ui_pop();
-	}
-}
-
-static const struct ui_screen confirm_screen = {
-	.name = "confirm",
-	.enter = confirm_enter,
-	.update = confirm_update,
-	.key = confirm_key,
-};
-
-void ui_confirm(const char *question, void (*yes)(void))
-{
-	confirm_question = question;
-	confirm_yes = yes;
-	ui_push(&confirm_screen);
-}
-
+/* ui [page <name>] */
 static int cmd_ui(const struct shell *sh, size_t argc, char **argv)
 {
-	shell_print(sh, "screen: %s (depth %d), backlight %d s, %u loops", stack[depth - 1]->name,
-		    depth, (int)backlight_s, loops);
+	if (argc == 3 && strcmp(argv[1], "page") == 0) {
+		for (int i = 0; i < ARRAY_SIZE(ring); i++) {
+			if (strcmp(argv[2], ring[i]->name) == 0) {
+				struct event ev = {.type = EVENT_PAGE, .screen = ring[i]};
+
+				k_msgq_put(&events, &ev, K_NO_WAIT);
+				return 0;
+			}
+		}
+		shell_error(sh, "no such page");
+		return -EINVAL;
+	}
+	shell_print(sh, "screen: %s (page %d of %d, depth %d), backlight %d s, %u loops",
+		    stack[depth - 1]->name, ring_pos, (int)ARRAY_SIZE(ring), depth,
+		    (int)backlight_s, loops);
 	return 0;
 }
-SHELL_CMD_REGISTER(ui, NULL, "Current screen and how often the UI thread has run", cmd_ui);
+SHELL_CMD_ARG_REGISTER(ui, NULL, "Current screen; \"ui page <name>\" goes to a page of the ring",
+		       cmd_ui, 1, 2);

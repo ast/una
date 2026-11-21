@@ -13,6 +13,8 @@
 
 #include <ff.h>
 
+#include "storage.h"
+
 LOG_MODULE_REGISTER(storage, LOG_LEVEL_INF);
 
 static FATFS fat_fs;
@@ -22,6 +24,26 @@ static struct fs_mount_t user_mount = {
 	.fs_data = &fat_fs,
 	.mnt_point = "/USER:",
 };
+
+static bool mounted;
+
+bool storage_info(struct storage_info *info, bool measure)
+{
+	static struct storage_info last;
+	struct fs_statvfs vfs;
+
+	if (!mounted) {
+		return false;
+	}
+	if (measure && fs_statvfs(user_mount.mnt_point, &vfs) == 0) {
+		uint64_t block = vfs.f_frsize;
+
+		last.total_mb = (block * vfs.f_blocks) >> 20;
+		last.free_mb = (block * vfs.f_bfree) >> 20;
+	}
+	*info = last;
+	return true;
+}
 
 static int storage_init(void)
 {
@@ -47,6 +69,7 @@ static int storage_init(void)
 		LOG_ERR("user volume not mounted: %d", ret);
 		return 0; /* the watch works without it */
 	}
+	mounted = true;
 	LOG_INF("user volume mounted");
 	return 0;
 }

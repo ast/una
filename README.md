@@ -18,15 +18,15 @@ shown here (see [Zephyr](#zephyr)):
 </p>
 <p>
 <img src="docs/images/face.png" width="150" alt="Digital watch face">
-<img src="docs/images/menu.png" width="150" alt="Menu">
 <img src="docs/images/stopwatch.png" width="150" alt="Stopwatch">
 <img src="docs/images/timer.png" width="150" alt="Timer">
+<img src="docs/images/alarm.png" width="150" alt="Alarm">
 </p>
 <p>
-<img src="docs/images/alarm.png" width="150" alt="Alarm">
-<img src="docs/images/battery.png" width="150" alt="Battery">
 <img src="docs/images/settings.png" width="150" alt="Settings">
-<img src="docs/images/ring.png" width="150" alt="An alert ringing">
+<img src="docs/images/systems.png" width="150" alt="Systems overview">
+<img src="docs/images/elec.png" width="150" alt="Electrical system page">
+<img src="docs/images/mcu.png" width="150" alt="MCU page">
 </p>
 
 Screenshots of the Zephyr firmware from its simulator, taken with `una-z -s
@@ -149,10 +149,12 @@ driver and the app. What it does so far:
 
 - Five watch faces: a digital one and four analogue dials, white or black
   (below). Each shows the date, the battery and the alarm time.
-- Stopwatch, countdown
-  timer and one daily alarm, which ring with the buzzer and the vibration
-  motor; battery screen; settings (face, dial colour, backlight time, sound,
-  vibration, power off).
+- One ring of pages, no menu: face, stopwatch, countdown timer, one daily
+  alarm, settings (backlight time, sound, vibration, power off) and systems.
+  Timer and alarm ring with the buzzer and the vibration motor.
+- System pages in the manner of an aircraft's: an overview of the subsystems
+  on the power lines, and a page each for the electrical system (currents,
+  charge, an hour's trend), the MCU, storage and alerts.
 - Battery gauge and charger status, power-off, Stop mode whenever idle and off
   USB: about 0.85 mA idle, a week on a charge (measured at v0.1.0).
 - Clock from the RTC with a stored UTC offset, set from the computer.
@@ -161,7 +163,7 @@ driver and the app. What it does so far:
 - Not yet: Bluetooth (the radio chip is held in reset), sensors, GPS. The plan
   is [docs/zephyr-plan.md](docs/zephyr-plan.md).
 
-The version is in `zephyr/una/app/VERSION` and shown under Settings, About.
+The version is in `zephyr/una/app/VERSION` and shown on the MCU system page.
 
 The stock bootloader stays in place and starts MCUboot at 0x08060000, which
 starts the app:
@@ -231,22 +233,43 @@ una-z sim stop
 
 ### Buttons and screens
 
-| Button | Stock name | Does |
-|---|---|---|
-| SW1, top left | UP | previous row, more |
-| SW2, top right (power) | SELECT | open, start/stop, next field |
-| SW3, bottom left | DOWN | next row, less, reset |
-| SW4, bottom right | BACK | back; held: watch face |
+The pages lie in a ring and the buttons mean the same on all of them:
 
-From the face, SELECT opens the menu (stopwatch, timer, alarm, battery,
-settings) and UP or DOWN shows the battery. A press is acted on at release;
+| Button | Stock name | Does, everywhere |
+|---|---|---|
+| SW1, top left | UP | previous of what is beside this: page, row, value |
+| SW3, bottom left | DOWN | next |
+| SW2, top right (power) | SELECT | what the page does, or go in; held: go in to change it |
+| SW4, bottom right | BACK | out one level, then to the face; held: the face |
+
+DOWN from the face goes through the ring in this order, UP the other way:
+
+| Page | SELECT | SELECT held |
+|---|---|---|
+| Face | go in: choose the face | the same |
+| Stopwatch | start, stop | reset |
+| Timer | start, stop | go in: set the minutes |
+| Alarm | on, off | go in: set hour, then minute |
+| Settings | go in: the list; then change the row | on "power off": power off |
+| Systems | go in: a page per subsystem | the same |
+
+Inside, UP and DOWN change the value or move to the next row or page, and
+what can be changed is cyan. There are no questions to confirm: what would
+need one is asked for by holding instead. A press is acted on at release;
 "held" is 0.7 s. Timer and alarm ring with the buzzer and the motor (`alert
-ring` in the shell does the same) until any button is pressed.
+ring` in the shell does the same) until any button is pressed. `una-z sh ui`
+shows the current page, `una-z sh ui page timer` goes to one.
+
+The system pages use one set of colours: white for names and units, green
+for a live value that is normal and for a line that carries current, amber
+and red for what needs attention, cyan for what can be set, grey for what is
+off or not known. They are drawn in `src/systems.c` with the helpers of
+`src/draw.c`.
 
 ### Watch faces
 
-Settings, Face opens a chooser that shows each face; UP and DOWN go through
-them. "Dial white/black" applies to the analogue ones. From the shell:
+SELECT on the face opens a chooser that shows each face; UP and DOWN go
+through them and SELECT turns an analogue dial white or black. From the shell:
 `una-z sh face 3 1` (face 0-4, white 0 or 1).
 
 | Face | After | Battery shown as |
