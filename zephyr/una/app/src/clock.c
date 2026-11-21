@@ -38,6 +38,21 @@ bool clock_local(struct tm *out)
 	return true;
 }
 
+time_t clock_utc(void)
+{
+	struct rtc_time utc;
+
+	if (rtc_get_time(rtc, &utc) != 0) {
+		return 0;
+	}
+	return timeutil_timegm(rtc_time_to_tm(&utc));
+}
+
+int clock_utc_offset(void)
+{
+	return tz_min * 60;
+}
+
 static int clock_setting_set(const char *name, size_t len, settings_read_cb read_cb, void *cb_arg)
 {
 	if (settings_name_steq(name, "tz_min", NULL) && len == sizeof(tz_min)) {

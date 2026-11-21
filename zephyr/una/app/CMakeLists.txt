@@ -11,7 +11,10 @@ target_sources(app PRIVATE
   src/dial.c
   src/draw.c
   src/face.c
+  src/fit.c
   src/main.c
+  src/record.c
+  src/record_page.c
   src/screenshot.c
   src/settings.c
   src/stopwatch.c

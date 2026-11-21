@@ -115,8 +115,9 @@ activity; what it was is a label chosen afterwards. System pages show the
 subsystems as an aircraft's displays do, and get a page per subsystem as
 they arrive (GNSS, sensors, radio).
 
-Order from here: the recorder in the simulator (FIT writer, emulated GNSS),
-the GNSS chip on the watch (LPUART1, 921600 baud, power on PG5, Zephyr's
+Done since: the recorder (FIT writer, emulated GNSS in the simulator; on
+the watch it records time only), its files checked with a third-party FIT
+decoder. Order from here: the GNSS chip on the watch (LPUART1, 921600 baud, power on PG5, Zephyr's
 `quectel,lc76g` driver), then altitude gain from the MS5837.
 
 Open: on 20-21 Nov the gauge reported 99-100 % through 22.3 h on battery at

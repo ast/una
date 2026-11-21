@@ -17,6 +17,7 @@
 #include <zephyr/shell/shell.h>
 
 #include "power.h"
+#include "record.h"
 #include "ui.h"
 
 LOG_MODULE_REGISTER(ui, LOG_LEVEL_INF);
@@ -127,9 +128,10 @@ SETTINGS_STATIC_HANDLER_DEFINE(ui, "ui", NULL, ui_setting_set, NULL, NULL);
 
 /* The ring: DOWN from the face goes through it in this order, UP in the other. */
 static const struct ui_screen *const ring[] = {
-	&face_screen,  &stopwatch_screen, &timer_screen,
-	&alarm_screen, &settings_screen,  &systems_screen,
+	&face_screen,  &record_screen,   &stopwatch_screen, &timer_screen,
+	&alarm_screen, &settings_screen, &systems_screen,
 };
+#define RING_RECORD 1
 static int ring_pos;
 
 static const struct ui_screen *stack[6] = {&face_screen};
@@ -158,8 +160,14 @@ static void ring_dots(void)
 
 static void show_top(void)
 {
+	static const struct ui_screen *shown;
+
+	if (shown != NULL && shown != stack[depth - 1] && shown->leave != NULL) {
+		shown->leave();
+	}
+	shown = stack[depth - 1];
 	lv_obj_clean(lv_screen_active());
-	stack[depth - 1]->enter();
+	shown->enter();
 	if (depth == 1 && ring_pos != 0) {
 		ring_dots();
 	}
@@ -207,6 +215,9 @@ static void default_key(enum ui_key key, bool held)
 	if (key == UI_KEY_BACK) {
 		if (depth > 1) {
 			ui_pop();
+		} else if (record_active() && ring_pos != RING_RECORD) {
+			/* What is being recorded is where "back" leads. */
+			ring_go(RING_RECORD);
 		} else {
 			ui_home();
 		}

@@ -8,3 +8,4 @@
 /zephyr/*
 !/zephyr/una/
 /logs/
+/runs/

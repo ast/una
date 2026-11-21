@@ -18,15 +18,15 @@ shown here (see [Zephyr](#zephyr)):
 </p>
 <p>
 <img src="docs/images/face.png" width="150" alt="Digital watch face">
+<img src="docs/images/record.png" width="150" alt="Recording a run">
+<img src="docs/images/summary.png" width="150" alt="Summary of a recording">
 <img src="docs/images/stopwatch.png" width="150" alt="Stopwatch">
-<img src="docs/images/timer.png" width="150" alt="Timer">
-<img src="docs/images/alarm.png" width="150" alt="Alarm">
 </p>
 <p>
-<img src="docs/images/settings.png" width="150" alt="Settings">
+<img src="docs/images/timer.png" width="150" alt="Timer">
+<img src="docs/images/alarm.png" width="150" alt="Alarm">
 <img src="docs/images/systems.png" width="150" alt="Systems overview">
 <img src="docs/images/elec.png" width="150" alt="Electrical system page">
-<img src="docs/images/mcu.png" width="150" alt="MCU page">
 </p>
 
 Screenshots of the Zephyr firmware from its simulator, taken with `una-z -s
@@ -149,9 +149,13 @@ driver and the app. What it does so far:
 
 - Five watch faces: a digital one and four analogue dials, white or black
   (below). Each shows the date, the battery and the alarm time.
-- One ring of pages, no menu: face, stopwatch, countdown timer, one daily
-  alarm, settings (backlight time, sound, vibration, power off) and systems.
-  Timer and alarm ring with the buzzer and the vibration motor.
+- One ring of pages, no menu: face, recorder, stopwatch, countdown timer, one
+  daily alarm, settings (backlight time, sound, vibration, power off) and
+  systems. Timer and alarm ring with the buzzer and the vibration motor.
+- One recorder for every activity: it keeps time, distance, pace and climb
+  and writes a FIT file as it goes; whether it was a walk, run, ride or hike
+  is a label on the summary. On the watch it records time only so far: the
+  GPS receiver is not driven yet (the simulator has an emulated one).
 - System pages in the manner of an aircraft's: an overview of the subsystems
   on the power lines, and a page each for the electrical system (currents,
   charge, an hour's trend), the MCU, storage and alerts.
@@ -160,7 +164,8 @@ driver and the app. What it does so far:
 - Clock from the RTC with a stored UTC offset, set from the computer.
 - Log files on the eMMC with a telemetry line a minute.
 - Firmware update over USB with automatic rollback; a simulator.
-- Not yet: Bluetooth (the radio chip is held in reset), sensors, GPS. The plan
+- Not yet: Bluetooth (the radio chip is held in reset), sensors, GPS on the
+  watch. The plan
   is [docs/zephyr-plan.md](docs/zephyr-plan.md).
 
 The version is in `zephyr/una/app/VERSION` and shown on the MCU system page.
@@ -192,6 +197,7 @@ una-z press 3                               # press SW3 (SW1-SW4, see the board 
 una-z press 4 1000                          # hold SW4 for a second
 una-z log 10                                # watch log messages for 10 s
 una-z logs                                  # copy the log files off the eMMC -> logs/
+una-z runs                                  # copy the recorded activities -> runs/
 una-z time                                  # set the watch's clock from this computer
 una-z reset                                 # reboot through mcumgr
 ```
@@ -213,8 +219,9 @@ puts the previous one back.
 The same app builds as a Linux program (Zephyr's `native_sim`): the UI, the
 shell, settings, the clock, alarms and timers run as on the watch, with the
 screen in SDL. What is hardware on the watch (battery, buzzer, motor) is
-stood in for by `src/sim.c` and set or read with the `sim` shell command.
-Power, USB, storage and Bluetooth are not in it.
+stood in for by `src/sim.c` and set or read with the `sim` shell command;
+the GPS receiver is Zephyr's emulated one and the user volume is the
+directory `build/sim/user`. Power, USB and Bluetooth are not in it.
 
 ```sh
 west build -b native_sim/native/64 -d build/sim zephyr/una/app   # once; then west build -d build/sim
@@ -224,6 +231,9 @@ una-z -s shot                # as on the watch -> build/sim-shot.png
 una-z -s press 2
 una-z -s sh sim battery 15 0 # 15 %, no USB power
 una-z -s sh sim state        # buzzer, motor, power-off asked for
+una-z -s sh sim gps 59.33 18.07 20   # a fix: latitude, longitude, altitude
+una-z -s sh sim move 11 45 5 # from there at 11 km/h heading 45, climbing 5 m/min
+una-z -s runs                # the recorded FIT files -> runs/
 una-z sim stop
 ```
 
@@ -247,6 +257,7 @@ DOWN from the face goes through the ring in this order, UP the other way:
 | Page | SELECT | SELECT held |
 |---|---|---|
 | Face | go in: choose the face | the same |
+| Record | start, pause, resume | finish |
 | Stopwatch | start, stop | reset |
 | Timer | start, stop | go in: set the minutes |
 | Alarm | on, off | go in: set hour, then minute |
@@ -265,6 +276,23 @@ for a live value that is normal and for a line that carries current, amber
 and red for what needs attention, cyan for what can be set, grey for what is
 off or not known. They are drawn in `src/systems.c` with the helpers of
 `src/draw.c`.
+
+### Recording
+
+SELECT on the Record page starts at once; the clock runs while the receiver
+looks for its first fix. A short press only ever pauses and resumes, so a
+recording is not ended or lost by a slip; holding SELECT finishes it and
+shows the summary with a guess of what it was (by the average speed), which
+UP and DOWN change. The other pages stay within reach while recording, and
+BACK leads to the recording instead of the face.
+
+The file is `/Activity/YYYYMM/activity_<start>.fit` on the user volume:
+a record a second (position, distance, speed, altitude), a lap a kilometre
+with a nudge of the motor, and the session. It is written as it is recorded
+(`recording.fit`, synced every 10 s) and one that power was lost in is
+finished at the next start. `una-z runs` copies the files; they open in
+anything that reads FIT. The writer is `src/fit.c`, the recorder
+`src/record.c`; `una-z sh record` shows its state.
 
 ### Watch faces
 

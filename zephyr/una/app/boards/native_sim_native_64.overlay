@@ -9,6 +9,11 @@
 / {
 	aliases {
 		backlight = &backlight;
+		gnss = &gnss;
+	};
+
+	gnss: gnss {
+		compatible = "zephyr,gnss-emul";
 	};
 
 	leds {

@@ -3,8 +3,11 @@
  * asks of src/power.c, answered with values set from the shell.
  */
 
+#include <math.h>
 #include <stdlib.h>
+#include <string.h>
 
+#include <zephyr/drivers/gnss/gnss_emul.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/shell/shell.h>
@@ -98,6 +101,68 @@ static int cmd_battery(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+/* The receiver: where it is, and how it moves. */
+static const struct device *const gnss = DEVICE_DT_GET(DT_ALIAS(gnss));
+static struct navigation_data nav;
+static int climb_mm_s;
+
+static void gnss_set(bool fix)
+{
+	struct gnss_info info = {
+		.satellites_cnt = fix ? 9 : 0,
+		.hdop = fix ? 900 : 99000,
+		.fix_status = fix ? GNSS_FIX_STATUS_GNSS_FIX : GNSS_FIX_STATUS_NO_FIX,
+		.fix_quality = fix ? GNSS_FIX_QUALITY_GNSS_SPS : GNSS_FIX_QUALITY_INVALID,
+	};
+
+	gnss_emul_set_data(gnss, &nav, &info, 0);
+}
+
+static void move(struct k_work *work)
+{
+	const double deg_per_m = 1e9 / 111195.0; /* nanodegrees */
+	double heading = nav.bearing / 1000.0 * 3.14159265358979323846 / 180;
+	double m = nav.speed / 1000.0;
+
+	nav.latitude += (int64_t)(m * cos(heading) * deg_per_m);
+	nav.longitude += (int64_t)(m * sin(heading) * deg_per_m /
+				   cos(nav.latitude / 1e9 * 3.14159265358979323846 / 180));
+	nav.altitude += climb_mm_s;
+	gnss_set(true);
+	if (nav.speed > 0) {
+		k_work_schedule(k_work_delayable_from_work(work), K_SECONDS(1));
+	}
+}
+static K_WORK_DELAYABLE_DEFINE(move_work, move);
+
+/* sim gps off | <latitude> <longitude> [altitude m] */
+static int cmd_gps(const struct shell *sh, size_t argc, char **argv)
+{
+	if (strcmp(argv[1], "off") == 0) {
+		nav.speed = 0;
+		gnss_set(false);
+		return 0;
+	}
+	if (argc < 3) {
+		return -EINVAL;
+	}
+	nav.latitude = (int64_t)(strtod(argv[1], NULL) * 1e9);
+	nav.longitude = (int64_t)(strtod(argv[2], NULL) * 1e9);
+	nav.altitude = argc > 3 ? atoi(argv[3]) * 1000 : 0;
+	gnss_set(true);
+	return 0;
+}
+
+/* sim move <km/h> <heading> [climb m/min] */
+static int cmd_move(const struct shell *sh, size_t argc, char **argv)
+{
+	nav.speed = (uint32_t)(strtod(argv[1], NULL) * 1000000 / 3600);
+	nav.bearing = atoi(argv[2]) * 1000;
+	climb_mm_s = argc > 3 ? atoi(argv[3]) * 1000 / 60 : 0;
+	k_work_schedule(&move_work, K_NO_WAIT);
+	return 0;
+}
+
 static int cmd_state(const struct shell *sh, size_t argc, char **argv)
 {
 	shell_print(sh, "power off asked for: %s", powered_off ? "yes" : "no");
@@ -109,6 +174,9 @@ static int cmd_state(const struct shell *sh, size_t argc, char **argv)
 SHELL_STATIC_SUBCMD_SET_CREATE(sim_cmds,
 	SHELL_CMD_ARG(battery, NULL, "<percent> <usb power 0|1> [charger state 0-6]", cmd_battery,
 		      3, 1),
+	SHELL_CMD_ARG(gps, NULL, "off | <latitude> <longitude> [altitude m]", cmd_gps, 2, 2),
+	SHELL_CMD_ARG(move, NULL, "<km/h> <heading> [climb m/min]: move from where gps put it",
+		      cmd_move, 3, 1),
 	SHELL_CMD(state, NULL, "What the UI has asked of the hardware", cmd_state),
 	SHELL_SUBCMD_SET_END);
 SHELL_CMD_REGISTER(sim, &sim_cmds, "Simulated hardware", NULL);

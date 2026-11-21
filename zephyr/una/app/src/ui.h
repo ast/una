@@ -36,6 +36,8 @@ struct ui_screen {
 	 * does everywhere: UP and DOWN move in the ring, BACK goes out.
 	 */
 	bool (*key)(enum ui_key key, bool held);
+	/* Optional: the screen is no longer the one shown, however that came about. */
+	void (*leave)(void);
 };
 
 /*
@@ -86,6 +88,7 @@ void ui_title(const char *title);
 
 extern const struct ui_screen face_screen;
 extern const struct ui_screen face_chooser_screen;
+extern const struct ui_screen record_screen;
 extern const struct ui_screen settings_screen;
 extern const struct ui_screen systems_screen;
 extern const struct ui_screen stopwatch_screen;

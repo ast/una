@@ -10,4 +10,10 @@
  */
 bool clock_local(struct tm *out);
 
+/* Seconds since 1970, UTC; 0 while the RTC has not been set. */
+time_t clock_utc(void);
+
+/* Seconds east of UTC. */
+int clock_utc_offset(void);
+
 #endif

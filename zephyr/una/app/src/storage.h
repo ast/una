@@ -4,6 +4,14 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* Where the user volume is mounted. */
+#ifdef CONFIG_BOARD_UNA_WATCH
+#define STORAGE_ROOT "/USER:"
+#else
+/* The simulator mounts a directory of the computer here (-volume). */
+#define STORAGE_ROOT "/USER"
+#endif
+
 struct storage_info {
 	uint32_t total_mb;
 	uint32_t free_mb;

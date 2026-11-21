@@ -13,6 +13,8 @@
                              SECONDS (default 5)
   una-z logs [DIR]           copy the log files kept on the eMMC (telemetry, one
                              line a minute) to DIR (default: logs/)
+  una-z runs [DIR]           copy the recorded activities (FIT files) to DIR
+                             (default: runs/)
   una-z time                 set the watch's clock and UTC offset from this computer
   una-z wait                 wait until the shell answers
   una-z reset                reboot through mcumgr (works when the shell is stuck)
@@ -20,7 +22,8 @@
   una-z sim [--window]       start the simulator (build/sim, see the README), again
                              if it is running; --window shows its screen
   una-z sim stop
-  una-z -s COMMAND...        sh, shot, press, log, time and wait, on the simulator
+  una-z -s COMMAND...        sh, shot, press, log, runs, time and wait, on the
+                             simulator
 
 The first USB serial port is the shell, the second is mcumgr.
 """
@@ -29,6 +32,7 @@ import glob
 import os
 import re
 import select
+import shutil
 import subprocess
 import sys
 import termios
@@ -204,6 +208,7 @@ def flash(path):
 
 
 LOG_DIR = "/USER:/Log/Zephyr"
+ACTIVITY_DIR = "/USER:/Activity"
 
 
 def logs(dest):
@@ -213,6 +218,26 @@ def logs(dest):
     for name in sorted(names):
         smpmgr("file", "download", f"{LOG_DIR}/{name}", os.path.join(dest, name))
         print(os.path.join(dest, name), os.path.getsize(os.path.join(dest, name)), "bytes")
+
+
+def runs(dest):
+    """Recorded activities are FIT files in /Activity/YYYYMM/ on the user volume."""
+    os.makedirs(dest, exist_ok=True)
+    if SIM:
+        # The simulator's user volume is a directory here.
+        for path in sorted(glob.glob(os.path.join(SIM_DIR, "user/Activity/*/*.fit"))):
+            shutil.copy(path, dest)
+            print(os.path.join(dest, os.path.basename(path)))
+        return
+    def names(path):
+        return [l.split()[-1].rstrip("/") for l in shell(f"fs ls {path}").split("\n")
+                if l.split()[-1:]]
+    for month in sorted(n for n in names(ACTIVITY_DIR) if n.isdigit()):
+        for name in sorted(n for n in names(f"{ACTIVITY_DIR}/{month}") if n.endswith(".fit")):
+            out = os.path.join(dest, name)
+            if not os.path.exists(out):
+                smpmgr("file", "download", f"{ACTIVITY_DIR}/{month}/{name}", out)
+            print(out, os.path.getsize(out), "bytes")
 
 
 def sim_stop():
@@ -244,7 +269,10 @@ def sim_start(window):
     log_path = os.path.join(SIM_DIR, "sim.log")
     with open(log_path, "w") as out:
         # Settings are kept in flash.bin, as the watch keeps them in its flash.
-        proc = subprocess.Popen([exe, "-flash=" + os.path.join(SIM_DIR, "flash.bin")],
+        # and the user volume is a directory.
+        os.makedirs(os.path.join(SIM_DIR, "user"), exist_ok=True)
+        proc = subprocess.Popen([exe, "-flash=" + os.path.join(SIM_DIR, "flash.bin"),
+                                 "-volume=" + os.path.join(SIM_DIR, "user") + ":/USER"],
                                 stdin=subprocess.DEVNULL, stdout=out, stderr=out, env=env,
                                 start_new_session=True)
     end = time.time() + 10
@@ -287,7 +315,7 @@ def main():
         else:
             sys.exit(__doc__)
         return
-    if SIM and cmd not in ("sh", "shot", "press", "log", "time", "wait"):
+    if SIM and cmd not in ("sh", "shot", "press", "log", "runs", "time", "wait"):
         sys.exit(f"{cmd}: not on the simulator")
     try:
         if cmd == "sh":
@@ -308,6 +336,8 @@ def main():
             log(float(rest[0]) if rest else 5.0)
         elif cmd == "reset":
             smpmgr("os", "reset")
+        elif cmd == "runs":
+            runs(rest[0] if rest else os.path.join(ROOT, "runs"))
         elif cmd == "logs":
             logs(rest[0] if rest else os.path.join(ROOT, "logs"))
         elif cmd == "time":
