@@ -12,18 +12,17 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include <stdio.h>
+#include <string.h>
 #include <time.h>
 
-#include <zephyr/device.h>
-#include <zephyr/drivers/gnss.h>
 #include <zephyr/fs/fs.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
-#include <zephyr/pm/device.h>
 #include <zephyr/shell/shell.h>
 
 #include "alert.h"
 #include "clock.h"
+#include "gnss.h"
 #include "record.h"
 #include "storage.h"
 #include "ui.h"
@@ -36,8 +35,6 @@ LOG_MODULE_REGISTER(record, LOG_LEVEL_INF);
 #define SYNC_EVERY_S 10
 #define LAP_CM       100000
 
-/* A fix older than this is no fix. */
-#define FIX_FRESH_MS 3000
 /* Below this speed a move counts only once it is this long: a still receiver wanders. */
 #define MOVING_MM_S  400
 #define MOVED_M      10
@@ -46,20 +43,13 @@ LOG_MODULE_REGISTER(record, LOG_LEVEL_INF);
 /* Climbing counts in steps of this, which is above the noise of GNSS altitude. */
 #define ASCENT_STEP_MM 5000
 
-#define GNSS_NODE DT_ALIAS(gnss)
-
-#if DT_NODE_EXISTS(GNSS_NODE)
-static const struct device *const gnss = DEVICE_DT_GET(GNSS_NODE);
-#else
-static const struct device *const gnss;
-#endif
-
 enum command {
 	CMD_START,
 	CMD_PAUSE,
 	CMD_RESUME,
 	CMD_FINISH,
 	CMD_LABEL,
+	CMD_DISCARD,
 };
 
 struct command_msg {
@@ -68,17 +58,6 @@ struct command_msg {
 };
 
 K_MSGQ_DEFINE(commands, sizeof(struct command_msg), 8, 1);
-
-/* The latest fix, from the receiver's thread. */
-static struct {
-	int64_t latitude; /* nanodegrees */
-	int64_t longitude;
-	int32_t altitude_mm;
-	uint32_t speed_mm_s;
-	int64_t at_ms;
-	bool valid;
-} fix;
-static struct k_spinlock fix_lock;
 
 /* What the UI sees. */
 static struct record_state shown;
@@ -97,40 +76,12 @@ static uint32_t distance_cm;
 static uint32_t laps;
 static char last_path[96];
 
-#if DT_NODE_EXISTS(GNSS_NODE)
-static void on_gnss_data(const struct device *dev, const struct gnss_data *data)
-{
-	ARG_UNUSED(dev);
-
-	K_SPINLOCK(&fix_lock) {
-		fix.valid = data->info.fix_status != GNSS_FIX_STATUS_NO_FIX;
-		fix.latitude = data->nav_data.latitude;
-		fix.longitude = data->nav_data.longitude;
-		fix.altitude_mm = data->nav_data.altitude;
-		fix.speed_mm_s = data->nav_data.speed;
-		fix.at_ms = k_uptime_get();
-	}
-}
-GNSS_DATA_CALLBACK_DEFINE(DEVICE_DT_GET(GNSS_NODE), on_gnss_data);
-#endif
-
-/* The receiver is on only while something is recorded. */
-static void gnss_power(bool on)
-{
-	if (gnss == NULL) {
-		return;
-	}
-	(void)pm_device_action_run(gnss, on ? PM_DEVICE_ACTION_RESUME : PM_DEVICE_ACTION_SUSPEND);
-	if (!on) {
-		K_SPINLOCK(&fix_lock) {
-			fix.valid = false;
-		}
-	}
-}
-
 static void publish(void)
 {
-	now.gnss = gnss != NULL;
+	struct gnss_status receiver;
+
+	gnss_status(&receiver);
+	now.gnss = receiver.present;
 	K_SPINLOCK(&shown_lock) {
 		shown = now;
 	}
@@ -178,6 +129,11 @@ void record_finish(void)
 void record_label(enum fit_sport sport)
 {
 	send(CMD_LABEL, sport);
+}
+
+void record_discard(void)
+{
+	send(CMD_DISCARD, 0);
 }
 
 static uint32_t fit_now(void)
@@ -297,13 +253,13 @@ static void start(void)
 		LOG_ERR("recording without a file: %d", ret);
 	}
 	now.saved = ret == 0;
-	gnss_power(true);
+	gnss_want(GNSS_FOR_RECORD, true);
 	next_tick_ms = k_uptime_get() + 1000;
 }
 
 static void finish(void)
 {
-	gnss_power(false);
+	gnss_want(GNSS_FOR_RECORD, false);
 	now.phase = RECORD_IDLE;
 	now.fix = false;
 	now.speed_mm_s = 0;
@@ -326,19 +282,11 @@ static void tick(void)
 {
 	uint32_t values[] = {fit_now(), FIT_NO_POSITION, FIT_NO_POSITION, FIT_NONE, FIT_NONE,
 			     FIT_NONE};
-	bool fresh;
-	int64_t latitude = 0, longitude = 0, at_ms = 0;
-	int32_t altitude_mm = 0;
-	uint32_t speed_mm_s = 0;
-
-	K_SPINLOCK(&fix_lock) {
-		fresh = fix.valid && k_uptime_get() - fix.at_ms < FIX_FRESH_MS;
-		latitude = fix.latitude;
-		longitude = fix.longitude;
-		altitude_mm = fix.altitude_mm;
-		speed_mm_s = fix.speed_mm_s;
-		at_ms = fix.at_ms;
-	}
+	struct gnss_fix fix;
+	bool fresh = gnss_fix(&fix);
+	int64_t latitude = fix.latitude, longitude = fix.longitude, at_ms = fix.at_ms;
+	int32_t altitude_mm = fix.altitude_mm;
+	uint32_t speed_mm_s = fix.speed_mm_s;
 
 	now.timer_s++;
 	now.fix = fresh;
@@ -399,6 +347,30 @@ static void tick(void)
 	next_tick_ms += 1000;
 }
 
+#define DISCARDED_DIR ACTIVITY_DIR "/discarded"
+
+static void discard(void)
+{
+	const char *name = strrchr(last_path, '/');
+	char path[96];
+	int ret;
+
+	/* Nothing is shown as the last one any more. */
+	now = (struct record_state){0};
+	if (name == NULL) {
+		return;
+	}
+	(void)fs_mkdir(DISCARDED_DIR);
+	snprintf(path, sizeof(path), DISCARDED_DIR "%s", name);
+	ret = fs_rename(last_path, path);
+	if (ret < 0) {
+		LOG_ERR("recording not moved: %d", ret);
+		return;
+	}
+	LOG_INF("discarded: now %s", path);
+	last_path[0] = '\0';
+}
+
 static void handle(const struct command_msg *msg)
 {
 	switch (msg->command) {
@@ -447,12 +419,16 @@ static void handle(const struct command_msg *msg)
 			}
 		}
 		break;
+	case CMD_DISCARD:
+		if (now.phase == RECORD_IDLE) {
+			discard();
+		}
+		break;
 	}
 }
 
 static void record_thread(void *p1, void *p2, void *p3)
 {
-	gnss_power(false);
 	recover();
 	publish();
 

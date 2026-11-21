@@ -48,6 +48,9 @@ void ui_push(const struct ui_screen *screen);
 void ui_pop(void);
 void ui_home(void);
 
+/* Whether a button is down right now: for what must be held for long. */
+bool ui_key_is_down(enum ui_key key);
+
 /* Any thread: have the current screen updated now. */
 void ui_refresh(void);
 

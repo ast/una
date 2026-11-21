@@ -1,0 +1,19 @@
+config GNSS_AG3335M
+	bool "Airoha AG3335M GNSS receiver"
+	default y
+	depends on DT_HAS_AIROHA_AG3335M_ENABLED
+	depends on GNSS_REFERENCE_FRAME_WGS84
+	select MODEM_MODULES
+	select MODEM_BACKEND_UART
+	select MODEM_CHAT
+	select GNSS_PARSE
+	select GNSS_NMEA0183
+	select GNSS_NMEA0183_MATCH
+	help
+	  The UNA Watch's GNSS receiver: NMEA sentences on a UART, set up with
+	  Airoha's PAIR commands as the stock firmware does.
+
+config GNSS_AG3335M_SAT_ARRAY_SIZE
+	int "Satellites kept from the GSV sentences"
+	default 32
+	depends on GNSS_AG3335M && GNSS_SATELLITES

@@ -5,3 +5,7 @@ endif
 if DISK_DRIVERS
 rsource "disk/Kconfig"
 endif
+
+if GNSS
+rsource "gnss/Kconfig"
+endif

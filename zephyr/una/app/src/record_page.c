@@ -168,32 +168,61 @@ static const struct {
 static int label;
 static bool guess_awaited;
 
+/*
+ * Discarding is asked for by holding SELECT until a bar has filled, three
+ * seconds from the press: long enough not to be done by a slip, and seen
+ * coming.
+ */
+#define DISCARD_HOLD_MS 3000
+#define HELD_AFTER_MS   700 /* when the hold is first told of */
+
+static int64_t discard_since; /* 0: not being held */
+static bool discarded;
+
 static void paint_summary(void)
 {
+	const int w = 120;
 	const char *unit;
 	const char *text;
 	char climb[12];
 	lv_point_t size;
 
-	draw_text(0, -92, state.saved ? "SAVED" : "NOT SAVED", TEXT,
-		  state.saved ? DRAW_DIM : DRAW_AMBER, DRAW_CENTRE);
-	value(0, -64, kilometres(state.distance_m), "km", LARGE, DRAW_WHITE);
-	draw_text(0, -20, duration(state.timer_s), HUGE, DRAW_WHITE, DRAW_CENTRE);
+	draw_text(0, -92, "RECORDED", TEXT, DRAW_DIM, DRAW_CENTRE);
+	value(0, -66, kilometres(state.distance_m), "km", LARGE, DRAW_WHITE);
+	draw_text(0, -26, duration(state.timer_s), HUGE, DRAW_WHITE, DRAW_CENTRE);
 	text = pace(average_mm_s(), &unit);
-	value(-48, 24, text, unit, TEXT, DRAW_WHITE);
+	value(-48, 14, text, unit, TEXT, DRAW_WHITE);
 	snprintf(climb, sizeof(climb), "+%u", state.ascent_m);
-	value(48, 24, climb, "m", TEXT, DRAW_WHITE);
+	value(48, 14, climb, "m", TEXT, DRAW_WHITE);
 
+	if (discard_since != 0) {
+		int filled = MIN(k_uptime_get() - discard_since, DISCARD_HOLD_MS) * w /
+			     DISCARD_HOLD_MS;
+
+		draw_text(0, 38, "DISCARD", TEXT, DRAW_RED, DRAW_CENTRE);
+		draw_box(0, 60, w + 4, 16, DRAW_RED, false);
+		draw_box(-w / 2 + filled / 2, 60, filled, 12, DRAW_RED, true);
+		draw_text(0, 84, "let go: keep", SMALL, DRAW_DIM, DRAW_CENTRE);
+		return;
+	}
+	if (!state.saved) {
+		draw_text(0, 56, "NOT SAVED", TEXT, DRAW_AMBER, DRAW_CENTRE);
+		return;
+	}
 	/* What can be set here. */
+	draw_text(0, 36, "SAVE AS", SMALL, DRAW_DIM, DRAW_CENTRE);
 	lv_text_get_size(&size, labels[label].name, LARGE, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
 	draw_box(0, 60, size.x + 24, 28, DRAW_CYAN, true);
 	draw_text(0, 60, labels[label].name, LARGE, 0x000000, DRAW_CENTRE);
+	draw_text(0, 86, "hold: discard", SMALL, DRAW_DIM, DRAW_CENTRE);
 }
 
 static void summary_enter(void)
 {
 	canvas = draw_create(paint_summary);
 	guess_awaited = true;
+	discard_since = 0;
+	discarded = false;
 }
 
 static uint32_t summary_update(void)
@@ -212,12 +241,27 @@ static uint32_t summary_update(void)
 		}
 	}
 	lv_obj_invalidate(canvas);
-	return UINT32_MAX;
+	if (discard_since == 0) {
+		return UINT32_MAX;
+	}
+	if (!ui_key_is_down(UI_KEY_SELECT)) {
+		discard_since = 0;
+		return 0;
+	}
+	if (k_uptime_get() - discard_since >= DISCARD_HOLD_MS) {
+		discarded = true;
+		ui_pop();
+		return UINT32_MAX;
+	}
+	return 100;
 }
 
 static bool summary_key(enum ui_key key, bool held)
 {
 	if (held) {
+		if (key == UI_KEY_SELECT && state.saved) {
+			discard_since = k_uptime_get() - HELD_AFTER_MS;
+		}
 		return key != UI_KEY_BACK;
 	}
 	if (key == UI_KEY_UP) {
@@ -235,7 +279,11 @@ static bool summary_key(enum ui_key key, bool held)
 /* However the summary is left, the label is what it showed. */
 static void summary_leave(void)
 {
-	record_label(labels[label].sport);
+	if (discarded) {
+		record_discard();
+	} else {
+		record_label(labels[label].sport);
+	}
 }
 
 static const struct ui_screen summary_screen = {

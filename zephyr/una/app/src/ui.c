@@ -46,6 +46,13 @@ struct event {
 
 K_MSGQ_DEFINE(events, sizeof(struct event), 16, 4);
 
+static atomic_t keys_down;
+
+bool ui_key_is_down(enum ui_key key)
+{
+	return atomic_test_bit(&keys_down, key);
+}
+
 /*
  * The board's longpress node turns each button into one of two codes: A-D
  * when released early, W-Z once held.
@@ -58,7 +65,13 @@ static void on_input(struct input_event *evt, void *user_data)
 
 	ARG_UNUSED(user_data);
 
-	if (evt->type != INPUT_EV_KEY || !evt->value) {
+	if (evt->type != INPUT_EV_KEY) {
+		return;
+	}
+	if (evt->code >= INPUT_KEY_1 && evt->code <= INPUT_KEY_4) {
+		atomic_set_bit_to(&keys_down, evt->code - INPUT_KEY_1, evt->value);
+	}
+	if (!evt->value) {
 		return;
 	}
 	if (evt->code >= INPUT_KEY_1 && evt->code <= INPUT_KEY_4) {

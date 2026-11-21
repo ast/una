@@ -12,6 +12,7 @@ target_sources(app PRIVATE
   src/draw.c
   src/face.c
   src/fit.c
+  src/gnss.c
   src/main.c
   src/record.c
   src/record_page.c

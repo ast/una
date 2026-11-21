@@ -35,6 +35,7 @@
 		backlight = &backlight;
 		watchdog0 = &iwdg;
 		fuel-gauge0 = &fuel_gauge;
+		gnss = &gnss;
 		rtc = &rtc;
 	};
 
@@ -304,12 +305,6 @@ zephyr_udc0: &usbotg_hs {
 		output-low;
 	};
 
-	gnss-en-hog {
-		gpio-hog;
-		gpios = <5 GPIO_ACTIVE_HIGH>;
-		output-low;
-	};
-
 	vled-en-hog {
 		gpio-hog;
 		gpios = <10 GPIO_ACTIVE_HIGH>;
@@ -378,4 +373,20 @@ zephyr_udc0: &usbotg_hs {
 
 &iwdg {
 	status = "okay";
+};
+
+/*
+ * GNSS: Airoha AG3335M at 921600 baud, as the stock firmware has it. PG5
+ * (SENSOR2_RST_L in the stock source) is its power.
+ */
+&lpuart1 {
+	pinctrl-0 = <&lpuart1_tx_pa2 &lpuart1_rx_pa3>;
+	pinctrl-names = "default";
+	current-speed = <921600>;
+	status = "okay";
+
+	gnss: gnss {
+		compatible = "airoha,ag3335m";
+		enable-gpios = <&gpiog 5 GPIO_ACTIVE_HIGH>;
+	};
 };

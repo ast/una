@@ -44,5 +44,10 @@ void record_resume(void);
 void record_finish(void);
 /* Say what the last one was. */
 void record_label(enum fit_sport sport);
+/*
+ * The last one was a mistake. Its file is moved to /Activity/discarded
+ * rather than removed, so that this is not a mistake that loses anything.
+ */
+void record_discard(void);
 
 #endif

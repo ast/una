@@ -117,7 +117,10 @@ they arrive (GNSS, sensors, radio).
 
 Done since: the recorder (FIT writer, emulated GNSS in the simulator; on
 the watch it records time only), its files checked with a third-party FIT
-decoder. Order from here: the GNSS chip on the watch (LPUART1, 921600 baud, power on PG5, Zephyr's
+decoder. The GNSS chip answers (own driver `airoha,ag3335m` after all:
+Zephyr's LC76G driver starts the chip at boot and does not lock its sleep,
+after which it stops answering); a fix outdoors is still to be seen.
+Order from here: the GNSS chip on the watch (LPUART1, 921600 baud, power on PG5, Zephyr's
 `quectel,lc76g` driver), then altitude gain from the MS5837.
 
 Open: on 20-21 Nov the gauge reported 99-100 % through 22.3 h on battery at

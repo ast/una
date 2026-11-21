@@ -1,0 +1,13 @@
+description: |
+  Airoha AG3335M GNSS receiver on a UART, as on the UNA Watch. It is off
+  until gnss_ag3335m_power() turns it on.
+
+compatible: "airoha,ag3335m"
+
+include: uart-device.yaml
+
+properties:
+  enable-gpios:
+    type: phandle-array
+    required: true
+    description: Powers the chip.

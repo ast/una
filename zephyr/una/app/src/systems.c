@@ -18,6 +18,7 @@
 
 #include "alert.h"
 #include "draw.h"
+#include "gnss.h"
 #include "power.h"
 #include "storage.h"
 #include "ui.h"
@@ -31,6 +32,7 @@
 static lv_obj_t *canvas;
 static struct power_status st;
 static struct power_stats stats;
+static struct gnss_status gnss;
 
 /* PCA9420 charger states. */
 static const char *charger_name(void)
@@ -156,14 +158,22 @@ static void paint_overview(void)
 		block(60, y2, "STOR", "---", DRAW_GREY);
 	}
 
+	/* The receiver: how many satellites its fix is of, or that it is looking. */
+	if (!gnss.on) {
+		block(x3[0], y3, "GNSS", gnss.present ? "OFF" : "---", DRAW_GREY);
+	} else if (gnss.fix) {
+		snprintf(text, sizeof(text), "3D %d", gnss.used);
+		block(x3[0], y3, "GNSS", text, DRAW_GREEN);
+	} else {
+		block(x3[0], y3, "GNSS", "ACQ", DRAW_AMBER);
+	}
 	/* Not built yet: their supplies are off. */
-	block(x3[0], y3, "GNSS", "OFF", DRAW_GREY);
 	block(x3[1], y3, "BLE", "RST", DRAW_GREY);
 	block(x3[2], y3, "SENS", "OFF", DRAW_GREY);
 	block(x3[3], y3, "ALRT", sound ? "ON" : "MUTE", sound ? DRAW_GREEN : DRAW_GREY);
 	for (int i = 0; i < ARRAY_SIZE(x3); i++) {
 		draw_line(x3[i], sub, x3[i], y3 - BLOCK_H / 2, 1,
-			  i == 3 && sound ? DRAW_GREEN : DRAW_GREY);
+			  (i == 0 && gnss.on) || (i == 3 && sound) ? DRAW_GREEN : DRAW_GREY);
 	}
 }
 
@@ -176,8 +186,10 @@ static uint32_t systems_update(void)
 {
 	power_last(&st);
 	power_stats(&stats);
+	gnss_status(&gnss);
 	lv_obj_invalidate(canvas);
-	return 5000;
+	/* A receiver that is on has news every second. */
+	return gnss.on ? 1000 : 5000;
 }
 
 /* The pages */
@@ -186,6 +198,7 @@ enum page {
 	PAGE_ELEC,
 	PAGE_MCU,
 	PAGE_STOR,
+	PAGE_GNSS,
 	PAGE_ALRT,
 	PAGE_COUNT,
 };
@@ -356,6 +369,48 @@ static void paint_stor(void)
 	}
 }
 
+/* The receiver: what it has, and how strongly it hears its best satellites. */
+static void paint_gnss(void)
+{
+	const int base = 78, bar_w = 9, pitch = 12, full = 44; /* 44 px is 50 dB-Hz */
+	char text[16];
+
+	title("GNSS");
+	if (!gnss.present) {
+		line(1, "POWER", "---", "", DRAW_GREY);
+		return;
+	}
+	line(0, "POWER", gnss.on ? "ON" : "OFF", "", gnss.on ? DRAW_GREEN : DRAW_GREY);
+	if (gnss.on) {
+		snprintf(text, sizeof(text), "%u", gnss.on_s);
+		figure(52, -62, "", text, "s", DRAW_GREEN);
+		line(1, "FIX", gnss.fix ? "3D" : "NONE", "", gnss.fix ? DRAW_GREEN : DRAW_AMBER);
+		snprintf(text, sizeof(text), "%d / %d", gnss.used, gnss.seen);
+		line(2, "SATS", text, "", gnss.seen > 0 ? DRAW_GREEN : DRAW_AMBER);
+		if (gnss.first_fix_s >= 0) {
+			snprintf(text, sizeof(text), "%d", gnss.first_fix_s);
+			line(3, "TTFF", text, "s", DRAW_GREEN);
+		} else {
+			/* Nothing comes in at all: the receiver is not talking. */
+			snprintf(text, sizeof(text), "%u", gnss.sentences);
+			line(3, "NMEA", text, "", gnss.sentences > 0 ? DRAW_GREEN : DRAW_RED);
+		}
+		draw_line(-72, base, 72, base, 1, DRAW_GREY);
+		for (int i = 0; i < GNSS_SNR_N; i++) {
+			int h = MIN(gnss.snr[i], 50) * full / 50;
+			int x = -66 + i * pitch;
+
+			if (h > 0) {
+				/* Under 25 dB-Hz a satellite is heard but of little use. */
+				draw_box(x, base - h / 2, bar_w, h,
+					 gnss.snr[i] >= 25 ? DRAW_GREEN : DRAW_DIM, true);
+			}
+		}
+	}
+	draw_text(0, 92, gnss_wanted(GNSS_FOR_PAGE) ? "TOP RIGHT: OFF" : "TOP RIGHT: ON", SMALL,
+		  DRAW_DIM, DRAW_CENTRE);
+}
+
 static void paint_alrt(void)
 {
 	title("ALRT");
@@ -368,7 +423,7 @@ static void paint_alrt(void)
 static void paint_page(void)
 {
 	static void (*const paint[PAGE_COUNT])(void) = {paint_elec, paint_mcu, paint_stor,
-							paint_alrt};
+							paint_gnss, paint_alrt};
 
 	paint[page]();
 }
@@ -390,10 +445,19 @@ static bool page_key(enum ui_key key, bool held)
 		page = (page + 1) % PAGE_COUNT;
 	} else if (key == UI_KEY_SELECT && page == PAGE_ALRT) {
 		alert_blip();
+	} else if (key == UI_KEY_SELECT && page == PAGE_GNSS) {
+		/* To look at the receiver without recording; see page_leave. */
+		gnss_want(GNSS_FOR_PAGE, !gnss_wanted(GNSS_FOR_PAGE));
 	} else {
 		return key == UI_KEY_SELECT;
 	}
 	return true;
+}
+
+/* The receiver is not left on by having looked at it. */
+static void page_leave(void)
+{
+	gnss_want(GNSS_FOR_PAGE, false);
 }
 
 static const struct ui_screen page_screen = {
@@ -401,6 +465,7 @@ static const struct ui_screen page_screen = {
 	.enter = page_enter,
 	.update = systems_update,
 	.key = page_key,
+	.leave = page_leave,
 };
 
 static bool systems_key(enum ui_key key, bool held)

@@ -154,18 +154,18 @@ driver and the app. What it does so far:
   systems. Timer and alarm ring with the buzzer and the vibration motor.
 - One recorder for every activity: it keeps time, distance, pace and climb
   and writes a FIT file as it goes; whether it was a walk, run, ride or hike
-  is a label on the summary. On the watch it records time only so far: the
-  GPS receiver is not driven yet (the simulator has an emulated one).
+  is a label on the summary. The GPS receiver is driven and answers; that
+  it gets a fix and gives a sound track outdoors is still to be tried.
 - System pages in the manner of an aircraft's: an overview of the subsystems
   on the power lines, and a page each for the electrical system (currents,
-  charge, an hour's trend), the MCU, storage and alerts.
+  charge, an hour's trend), the MCU, storage, the GPS receiver (satellites
+  and their signal strengths) and alerts.
 - Battery gauge and charger status, power-off, Stop mode whenever idle and off
   USB: about 0.85 mA idle, a week on a charge (measured at v0.1.0).
 - Clock from the RTC with a stored UTC offset, set from the computer.
 - Log files on the eMMC with a telemetry line a minute.
 - Firmware update over USB with automatic rollback; a simulator.
-- Not yet: Bluetooth (the radio chip is held in reset), sensors, GPS on the
-  watch. The plan
+- Not yet: Bluetooth (the radio chip is held in reset), sensors. The plan
   is [docs/zephyr-plan.md](docs/zephyr-plan.md).
 
 The version is in `zephyr/una/app/VERSION` and shown on the MCU system page.
@@ -286,6 +286,11 @@ shows the summary with a guess of what it was (by the average speed), which
 UP and DOWN change. The other pages stay within reach while recording, and
 BACK leads to the recording instead of the face.
 
+A recording made by mistake is discarded from the summary by holding SELECT
+for three seconds, while a red bar fills; letting go before it is full keeps
+the recording. Discarded files are moved to `/Activity/discarded`, not
+removed.
+
 The file is `/Activity/YYYYMM/activity_<start>.fit` on the user volume:
 a record a second (position, distance, speed, altitude), a lap a kilometre
 with a nudge of the motor, and the session. It is written as it is recorded
@@ -293,6 +298,15 @@ with a nudge of the motor, and the session. It is written as it is recorded
 finished at the next start. `una-z runs` copies the files; they open in
 anything that reads FIT. The writer is `src/fit.c`, the recorder
 `src/record.c`; `una-z sh record` shows its state.
+
+The receiver (Airoha AG3335M on LPUART1, driver in
+`zephyr/una/drivers/gnss/`) is on only while something is recorded, or
+while the GNSS system page has turned it on with SELECT, to look at it
+without recording. While it is on, a line goes to the log every ten
+seconds (fix, satellites used and heard, the six best signal strengths,
+time to the first fix), so that what happened outdoors can be read from
+`una-z logs` afterwards; `una-z sh gnss` shows the same now, and `una-z sh
+gnss on` turns it on from the shell.
 
 ### Watch faces
 
