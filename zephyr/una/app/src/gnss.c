@@ -167,26 +167,43 @@ static void on_satellites(const struct device *dev, const struct gnss_satellite 
 GNSS_SATELLITES_CALLBACK_DEFINE(DEVICE_DT_GET(GNSS_NODE), on_satellites);
 #endif
 
+static void stop_lock(bool hold)
+{
+#ifdef CONFIG_PM
+	if (hold) {
+		pm_policy_state_lock_get(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
+	} else {
+		pm_policy_state_lock_put(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
+	}
+#else
+	ARG_UNUSED(hold);
+#endif
+}
+
 static void set_power(bool on)
 {
-	int ret = power(on);
+	int ret;
 
+	/*
+	 * The UART's clock stops in Stop mode: the SoC stays out of it from
+	 * before the first command to the receiver until it is off.
+	 */
+	if (on) {
+		stop_lock(true);
+	}
+	ret = power(on);
 	if (ret < 0) {
 		LOG_ERR("receiver not turned %s: %d", on ? "on" : "off", ret);
 		if (on) {
+			stop_lock(false);
 			/* Whoever wanted it must ask again. */
 			atomic_clear(&wanted);
 			return;
 		}
 	}
-#ifdef CONFIG_PM
-	/* The UART's clock stops in Stop mode: the SoC stays out of it meanwhile. */
-	if (on) {
-		pm_policy_state_lock_get(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
-	} else {
-		pm_policy_state_lock_put(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
+	if (!on) {
+		stop_lock(false);
 	}
-#endif
 	K_SPINLOCK(&lock) {
 		state.on = on;
 		state.first_fix_s = -1;
