@@ -261,6 +261,34 @@ zephyr_udc0: &usbotg_hs {
 };
 
 /*
+ * The motion sensors' bus: BMI270 at 0x68 and the magnetometer (BMM350,
+ * 0x14, interrupt on PC2), which is not driven. Both have their supply
+ * whenever the watch has: left alone they sleep, at a few microamps.
+ */
+&i2c4 {
+	pinctrl-0 = <&i2c4_scl_pd12 &i2c4_sda_pd13>;
+	pinctrl-names = "default";
+	clock-frequency = <I2C_BITRATE_FAST>;
+	status = "okay";
+
+	/*
+	 * Started by the app (src/motion_hw.c), not at boot. Its INT2 is the
+	 * one wired. It lies turned a quarter in the watch: the mounting and
+	 * the angles of the wrist are the stock firmware's.
+	 */
+	imu: bmi270@68 {
+		compatible = "una,bmi270";
+		reg = <0x68>;
+		irq-gpios = <&gpioa 1 GPIO_ACTIVE_HIGH>;
+		int-pin = <2>;
+		axes = <1 0 2>;
+		axes-inverted = <1 0 0>;
+		wrist-wake-params = <1024 1774 1024 700 179 1925>;
+		zephyr,deferred-init;
+	};
+};
+
+/*
  * Main bus: PMIC 0x61, fuel gauge 0x36, USB-C sink 0x29, haptic driver 0x5a,
  * display board EEPROM 0x50. Pulled up on the board.
  */

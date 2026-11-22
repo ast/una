@@ -9,11 +9,13 @@
 
 #include "alert.h"
 #include "bluetooth.h"
+#include "motion.h"
 #include "power.h"
 #include "ui.h"
 
 enum {
 	ROW_BACKLIGHT,
+	ROW_WRIST,
 	ROW_SOUND,
 	ROW_VIBRATION,
 	ROW_BLUETOOTH,
@@ -34,6 +36,8 @@ static const char *row_text(int index)
 		}
 		snprintf(text, sizeof(text), "Backlight %d s", ui_backlight_s());
 		return text;
+	case ROW_WRIST:
+		return motion_wrist_light() ? "Wrist light on" : "Wrist light off";
 	case ROW_SOUND:
 		return alert_sound() ? "Sound on" : "Sound off";
 	case ROW_VIBRATION:
@@ -97,6 +101,9 @@ static bool settings_key(enum ui_key key, bool held)
 	switch (list.selected) {
 	case ROW_BACKLIGHT:
 		next_backlight();
+		break;
+	case ROW_WRIST:
+		motion_set_wrist_light(!motion_wrist_light());
 		break;
 	case ROW_SOUND:
 		alert_set_sound(!alert_sound());

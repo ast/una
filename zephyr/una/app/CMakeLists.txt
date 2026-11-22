@@ -18,6 +18,7 @@ target_sources(app PRIVATE
   src/gnss.c
   src/main.c
   src/messages.c
+  src/motion.c
   src/phone.c
   src/record.c
   src/record_page.c
@@ -36,6 +37,7 @@ if(CONFIG_BOARD_UNA_WATCH)
     src/baro_hw.c
     src/bluenrg.c
     src/bluetooth.c
+    src/motion_hw.c
     src/power.c
     src/storage.c
     src/usb.c

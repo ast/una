@@ -1,0 +1,1 @@
+add_subdirectory_ifdef(CONFIG_UNA_BMI270 bmi270)

@@ -15,6 +15,7 @@
 #include "alert.h"
 #include "baro.h"
 #include "bluetooth.h"
+#include "motion.h"
 #include "phone.h"
 #include "power.h"
 #include "storage.h"
@@ -175,6 +176,54 @@ static int cmd_baro(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+/*
+ * The accelerometer: a watch that lies on its back, steps as the simulator
+ * is told of them, and a wrist turned on command.
+ */
+static uint32_t steps;
+static bool wrist_on;
+
+int motion_hw_start(void)
+{
+	return 0;
+}
+
+int motion_hw_read(uint32_t *count, enum motion_activity *activity, int32_t accel_mg[3])
+{
+	static uint32_t last;
+
+	*count = steps;
+	*activity = steps != last ? MOTION_WALKING : MOTION_STILL;
+	last = steps;
+	accel_mg[0] = 0;
+	accel_mg[1] = 0;
+	accel_mg[2] = 1000;
+	return 0;
+}
+
+int motion_hw_wrist(bool on)
+{
+	wrist_on = on;
+	return 0;
+}
+
+/* sim steps <more of them> */
+static int cmd_steps(const struct shell *sh, size_t argc, char **argv)
+{
+	steps += atoi(argv[1]);
+	motion_poll();
+	return 0;
+}
+
+/* sim wrist: it is turned */
+static int cmd_wrist(const struct shell *sh, size_t argc, char **argv)
+{
+	if (wrist_on) {
+		motion_wrist_turned();
+	}
+	return 0;
+}
+
 /* sim gps off | <latitude> <longitude> [altitude m] */
 static int cmd_gps(const struct shell *sh, size_t argc, char **argv)
 {
@@ -294,5 +343,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sim_cmds,
 		      cmd_move, 3, 1),
 	SHELL_CMD_ARG(phone, NULL, "on | off | <a line the phone sends, in hex>", cmd_phone, 2, 0),
 	SHELL_CMD(state, NULL, "What the UI has asked of the hardware", cmd_state),
+	SHELL_CMD_ARG(steps, NULL, "<count>: so many more steps are walked", cmd_steps, 2, 0),
+	SHELL_CMD(wrist, NULL, "The wrist is turned for a look at the dial", cmd_wrist),
 	SHELL_SUBCMD_SET_END);
 SHELL_CMD_REGISTER(sim, &sim_cmds, "Simulated hardware", NULL);

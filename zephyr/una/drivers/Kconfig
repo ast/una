@@ -9,3 +9,7 @@ endif
 if GNSS
 rsource "gnss/Kconfig"
 endif
+
+if SENSOR
+rsource "sensor/Kconfig"
+endif

@@ -60,6 +60,9 @@ void ui_reload(void);
 /* Any thread: put this screen on top, unless it is there, and light up. */
 void ui_show(const struct ui_screen *screen);
 
+/* Any thread: light the screen as a button does. */
+void ui_light(void);
+
 /* Does not return. */
 void ui_run(void);
 

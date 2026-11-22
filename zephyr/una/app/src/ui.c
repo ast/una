@@ -30,6 +30,7 @@ atomic_t usage_backlight_ms;
 
 enum event_type {
 	EVENT_PRESS, /* a button went down: light up */
+	EVENT_LIGHT, /* light up, for another reason */
 	EVENT_KEY,
 	EVENT_REFRESH,
 	EVENT_SHOW,
@@ -101,6 +102,13 @@ void ui_refresh(void)
 void ui_reload(void)
 {
 	struct event ev = {.type = EVENT_RELOAD};
+
+	k_msgq_put(&events, &ev, K_NO_WAIT);
+}
+
+void ui_light(void)
+{
+	struct event ev = {.type = EVENT_LIGHT};
 
 	k_msgq_put(&events, &ev, K_NO_WAIT);
 }
@@ -292,7 +300,8 @@ void ui_run(void)
 			continue;
 		}
 		do {
-			if (ev.type == EVENT_PRESS || ev.type == EVENT_SHOW) {
+			if (ev.type == EVENT_PRESS || ev.type == EVENT_LIGHT ||
+			    ev.type == EVENT_SHOW) {
 				backlight_until = k_uptime_get() + backlight_s * 1000;
 			}
 			if (ev.type == EVENT_RELOAD) {

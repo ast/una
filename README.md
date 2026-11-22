@@ -54,7 +54,7 @@ simulator, smpmgr for firmware upload, plus openocd, probe-rs, tio and clangd.
 - Five watch faces: a digital one and four analogue dials, white or black
   (below). Each shows the date, the battery and the alarm time.
 - One ring of pages, no menu: face, recorder, messages, stopwatch, countdown
-  timer, one daily alarm, settings (backlight time, sound, vibration,
+  timer, one daily alarm, settings (backlight time, wrist light, sound, vibration,
   Bluetooth, power off) and systems. Timer and alarm ring with the buzzer and the vibration motor.
 - One recorder for every activity: it keeps time, distance, pace and climb
   and writes a FIT file as it goes; whether it was a walk, run, ride or hike
@@ -99,11 +99,12 @@ each of them.
 | Bluetooth, ST BlueNRG-2N | works | the chip's own stack over SPI (`src/bluenrg.c`): one serial service, Gadgetbridge | pairing; see Phone |
 | USB-C controller, STUSB4500 | not driven | charges at its defaults | reading what the cable offers |
 | Barometer, MS5837-02BA | works | on while recording, read once a second (`src/baro_hw.c`): climb, and altitude in the file | floors; what it costs in current is not measured |
-| Accelerometer and gyro, BMI270 | not driven | | steps, wrist wake, cadence; Zephyr's driver lacks the step counter; I2C4 0x68, interrupt PA1 |
+| Accelerometer and gyro, BMI270 | works, not yet tried on a wrist | own driver (`zephyr/una/drivers/sensor/bmi270`, made of Zephyr's): the chip's step counter and activity, read once a minute; a turn of the wrist lights the screen (`src/motion_hw.c`) | steps and wrist turn checked on a wrist; steps kept over a restart, shown on a page and stored per day; cadence; what it costs in current |
 | Magnetometer, BMM350 | not driven | | compass; Zephyr has a driver; I2C4 0x14, interrupt PC2 |
 | Heart rate, PixArt PAH8316 | not driven | | PixArt's algorithm is a closed library in the stock source; an open driver would be new work; I2C2 0x40, supplies on PF13 and PG10 |
 
-The parts that are not driven have their supplies held off.
+The heart-rate sensor has its supplies held off; the magnetometer and the
+USB-C controller have theirs with the watch and are left as they start.
 
 What is left besides the parts, roughly in the order it would be missed:
 
@@ -112,7 +113,8 @@ What is left besides the parts, roughly in the order it would be missed:
   firmware's idle figure would allow many times that. Suspects and a way to
   measure them are in the plan.
 - **Pairing.** Any phone in range can connect to the watch (see Phone).
-- **Steps and daily health**, from the accelerometer, and heart rate.
+- **Daily health**: the steps are counted but only the shell and the log
+  show them (`motion`); a page for them, a file per day, and heart rate.
 - **More from the phone**: music control, weather, calendar, answering or
   rejecting a call. Gadgetbridge sends them already; `src/phone.c` ignores
   what it does not know.
@@ -193,6 +195,8 @@ una-z -s sh sim state        # buzzer, motor, power-off asked for
 una-z -s sh sim gps 59.33 18.07 20   # a fix: latitude, longitude, altitude
 una-z -s sh sim move 11 45 5 # from there at 11 km/h heading 45, climbing 5 m/min
 una-z -s sh sim baro off     # no barometer answers (it follows the altitude otherwise)
+una-z -s sh sim steps 120    # so many more steps are walked
+una-z -s sh sim wrist        # the wrist is turned: the screen lights
 una-z -s runs                # the recorded FIT files -> runs/
 una-z sim stop
 ```
@@ -345,7 +349,9 @@ plain coulomb counter (0.5 mAh a step), kept to check the first against.
 `ua` is the mean battery current over the minute (negative = discharging; the
 gauge is only good to a few mA), `stops` the number of Stop-mode entries,
 `awake` the share of the minute the CPU was not idle, `keys` and
-`backlight_ms` button presses and backlight time. USB power changes are logged
+`backlight_ms` button presses and backlight time. After them come the radio
+(`bt`, `rx`, `tx`, `ln`, `rssi`), the day's `steps` and the turns of the
+`wrist` that lit the screen since boot. USB power changes are logged
 as they happen.
 
 Wear: a line is about 120 bytes, so about 170 KB a day, and each line costs

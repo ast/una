@@ -1,0 +1,35 @@
+# Copyright (c) 2021 Bosch Sensortec GmbH
+# Copyright (c) 2022 Nordic Semiconductor ASA
+# SPDX-License-Identifier: Apache-2.0
+
+config UNA_BMI270
+	bool "BMI270 accelerometer and gyroscope, with its wrist features"
+	default y
+	depends on DT_HAS_UNA_BMI270_ENABLED
+	select I2C
+	help
+	  Bosch's BMI270 on I2C: acceleration, rotation, and the chip's own
+	  step counter, activity, wrist-wear wake-up and motion detection.
+	  Made of Zephyr's driver for the part, which has none of the features
+	  but any motion.
+
+if UNA_BMI270
+
+config UNA_BMI270_THREAD_PRIORITY
+	int "Priority of the thread that handles the chip's interrupts"
+	default 8
+
+config UNA_BMI270_THREAD_STACK_SIZE
+	int "Stack of the thread that handles the chip's interrupts"
+	default 1536
+	help
+	  Trigger handlers run on it.
+
+config UNA_BMI270_LOW_POWER_MODE
+	bool "Power-optimized filters at every rate"
+	help
+	  The accelerometer and the gyroscope use their power-optimized
+	  filters whatever the rate. Otherwise they do so below 100 Hz only,
+	  and from there on the ones that perform best.
+
+endif # UNA_BMI270

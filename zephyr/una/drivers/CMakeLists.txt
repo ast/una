@@ -1,3 +1,4 @@
 add_subdirectory_ifdef(CONFIG_DISPLAY display)
 add_subdirectory_ifdef(CONFIG_DISK_DRIVERS disk)
 add_subdirectory_ifdef(CONFIG_GNSS gnss)
+add_subdirectory_ifdef(CONFIG_SENSOR sensor)

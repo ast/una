@@ -1,0 +1,46 @@
+description: |
+  Bosch BMI270 accelerometer and gyroscope on I2C, with the chip's features
+  for a wrist: step counter, activity, wrist-wear wake-up, any and no
+  motion. This tree's driver (drivers/sensor/bmi270, see <una/bmi270.h>),
+  made of Zephyr's for "bosch,bmi270".
+
+  The driver uploads 8 kB of configuration when it starts, a fifth of a
+  second at 400 kHz. With zephyr,deferred-init that is not spent at boot.
+
+compatible: "una,bmi270"
+
+include: [sensor-device.yaml, i2c-device.yaml]
+
+properties:
+  irq-gpios:
+    type: phandle-array
+    description: |
+      The one interrupt line to the host; every interrupt of the chip is put
+      on it. Without it there are no triggers.
+
+  int-pin:
+    type: int
+    default: 1
+    enum: [1, 2]
+    description: Which of the chip's pins, INT1 or INT2, irq-gpios is wired to.
+
+  axes:
+    type: array
+    default: [0, 1, 2]
+    description: |
+      For each axis of the device, x y z, the axis of the chip (0 x, 1 y,
+      2 z) that lies along it. The chip's features assume a watch seen from
+      the front: x to three o'clock, y to twelve, z out of the dial.
+
+  axes-inverted:
+    type: array
+    default: [0, 0, 0]
+    description: For each axis of the device, 1 when the chip's points the other way.
+
+  wrist-wake-params:
+    type: array
+    description: |
+      WR_WAKEUP_2 to WR_WAKEUP_7: min_angle_focus, min_angle_nonfocus,
+      max_tilt_lr, max_tilt_ll, max_tilt_pd, max_tilt_pu, each the cosine or
+      sine of an angle times 2048 (datasheet 4.8.6). The chip's own values
+      when absent.

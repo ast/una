@@ -212,6 +212,26 @@ metre. Climb is counted from it in steps of 3 m. The altitude in the file is
 the barometer's, moved by the mean difference to the receiver's (the
 weather). Not done: what it costs in current, floors.
 
+Accelerometer: the BMI270 has a driver in this tree
+(`zephyr/una/drivers/sensor/bmi270`, compatible `una,bmi270`), made of
+Zephyr's. Zephyr's has any motion as its only feature, writes the feature
+registers with advanced power save on (they read as zeros then, and the
+datasheet has the writes done with it off), and takes a single interrupt
+line to be INT1, where the watch has INT2 wired. Added: step counter and
+detector, activity, wrist-wear wake-up, no motion; the mounting (the stock
+firmware's: x is the chip's -y, y its x) and the wrist's angles from the
+devicetree; the accelerometer at 50 Hz, power-optimized, only while a
+feature is on. Left out: SPI, the FIFO. The app (`src/motion.c`,
+`src/motion_hw.c`) starts it after boot (the 8 kB of configuration take a
+fifth of a second), has steps and activity counted, asks for the count once
+a minute and lights the screen when the wrist is turned (a setting).
+Checked on the watch: the chip starts, every feature register reads back as
+written, lying flat it reads 0 0 1 g. Not checked: steps against steps
+walked, and the wrist, which need the watch worn. Not done: the count is
+lost at a restart (the driver resets the chip), nothing shows or stores the
+steps but the shell and the log, cadence, what it costs in current (the
+datasheet has some tens of microamps).
+
 A newer chip firmware from ST would pass data in controller-only mode and
 can be loaded over SPI. It is not done: it would change the chip under the
 stock firmware too.
