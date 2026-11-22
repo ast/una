@@ -98,7 +98,7 @@ each of them.
 | GPS, Airoha AG3335M | works | own driver (`zephyr/una/drivers/gnss`): fix in about a minute, position, speed, satellites | assisted start (EPO), a whole track checked outdoors, the count of satellites heard is too low |
 | Bluetooth, ST BlueNRG-2N | works | the chip's own stack over SPI (`src/bluenrg.c`): one serial service, Gadgetbridge | pairing; see Phone |
 | USB-C controller, STUSB4500 | not driven | charges at its defaults | reading what the cable offers |
-| Barometer, MS5837 | not driven | | altitude and climb for recordings; Zephyr has a driver; I2C2 0x76, supply on PG0 |
+| Barometer, MS5837-02BA | works | on while recording, read once a second (`src/baro_hw.c`): climb, and altitude in the file | floors; what it costs in current is not measured |
 | Accelerometer and gyro, BMI270 | not driven | | steps, wrist wake, cadence; Zephyr's driver lacks the step counter; I2C4 0x68, interrupt PA1 |
 | Magnetometer, BMM350 | not driven | | compass; Zephyr has a driver; I2C4 0x14, interrupt PC2 |
 | Heart rate, PixArt PAH8316 | not driven | | PixArt's algorithm is a closed library in the stock source; an open driver would be new work; I2C2 0x40, supplies on PF13 and PG10 |
@@ -112,7 +112,6 @@ What is left besides the parts, roughly in the order it would be missed:
   firmware's idle figure would allow many times that. Suspects and a way to
   measure them are in the plan.
 - **Pairing.** Any phone in range can connect to the watch (see Phone).
-- **Altitude gain** in recordings, from the barometer.
 - **Steps and daily health**, from the accelerometer, and heart rate.
 - **More from the phone**: music control, weather, calendar, answering or
   rejecting a call. Gadgetbridge sends them already; `src/phone.c` ignores
@@ -193,6 +192,7 @@ una-z -s sh sim battery 15 0 # 15 %, no USB power
 una-z -s sh sim state        # buzzer, motor, power-off asked for
 una-z -s sh sim gps 59.33 18.07 20   # a fix: latitude, longitude, altitude
 una-z -s sh sim move 11 45 5 # from there at 11 km/h heading 45, climbing 5 m/min
+una-z -s sh sim baro off     # no barometer answers (it follows the altitude otherwise)
 una-z -s runs                # the recorded FIT files -> runs/
 una-z sim stop
 ```

@@ -17,6 +17,7 @@
 #endif
 
 #include "alert.h"
+#include "baro.h"
 #include "bluetooth.h"
 #include "clock.h"
 #include "draw.h"
@@ -36,6 +37,9 @@ static lv_obj_t *canvas;
 static struct power_status st;
 static struct power_stats stats;
 static struct gnss_status gnss;
+static struct baro_status baro;
+static struct baro_reading air;
+static bool have_air;
 static struct bluetooth_status ble;
 
 /* PCA9420 charger states. */
@@ -182,7 +186,14 @@ static void paint_overview(void)
 		block(x3[1], y3, "BLE", "ADV", DRAW_GREEN);
 	}
 	/* Not built yet: their supply is off. */
-	block(x3[2], y3, "SENS", "OFF", DRAW_GREY);
+	if (!baro.on) {
+		block(x3[2], y3, "SENS", "OFF", DRAW_GREY);
+	} else if (have_air) {
+		snprintf(text, sizeof(text), "%d", (int)(air.pressure_pa / 100));
+		block(x3[2], y3, "SENS", text, DRAW_GREEN);
+	} else {
+		block(x3[2], y3, "SENS", "---", DRAW_AMBER);
+	}
 	block(x3[3], y3, "ALRT", sound ? "ON" : "MUTE", sound ? DRAW_GREEN : DRAW_GREY);
 	for (int i = 0; i < ARRAY_SIZE(x3); i++) {
 		draw_line(x3[i], sub, x3[i], y3 - BLOCK_H / 2, 1,
@@ -203,10 +214,12 @@ static uint32_t systems_update(void)
 	power_last(&st);
 	power_stats(&stats);
 	gnss_status(&gnss);
+	baro_status(&baro);
+	have_air = baro_read(&air);
 	bluetooth_status(&ble);
 	lv_obj_invalidate(canvas);
-	/* A receiver that is on has news every second. */
-	return gnss.on ? 1000 : 5000;
+	/* A receiver or a barometer that is on has news every second. */
+	return gnss.on || baro.on ? 1000 : 5000;
 }
 
 /* The pages */
@@ -216,6 +229,7 @@ enum page {
 	PAGE_MCU,
 	PAGE_STOR,
 	PAGE_GNSS,
+	PAGE_SENS,
 	PAGE_BLE,
 	PAGE_ALRT,
 	PAGE_COUNT,
@@ -429,6 +443,36 @@ static void paint_gnss(void)
 		  DRAW_DIM, DRAW_CENTRE);
 }
 
+static void paint_sens(void)
+{
+	char text[16];
+
+	title("SENS");
+	if (!baro.on) {
+		/* Not seen is only known once it has been asked for. */
+		line(0, "BARO", "OFF", "", DRAW_GREY);
+	} else if (!have_air) {
+		line(0, "BARO", "---", "", DRAW_AMBER);
+	} else {
+		line(0, "BARO", "ON", "", DRAW_GREEN);
+		snprintf(text, sizeof(text), "%d.%02d", (int)(air.pressure_pa / 100),
+			 (int)(air.pressure_pa % 100));
+		line(1, "PRESS", text, "hPa", DRAW_GREEN);
+		snprintf(text, sizeof(text), "%d.%d", (int)(air.altitude_mm / 1000),
+			 abs((int)(air.altitude_mm % 1000)) / 100);
+		line(2, "STD ALT", text, "m", DRAW_GREEN);
+		snprintf(text, sizeof(text), "%d.%d", (int)(air.temperature_cc / 100),
+			 abs((int)(air.temperature_cc % 100)) / 10);
+		line(3, "TEMP", text, "C", DRAW_GREEN);
+	}
+	if (baro.failures > 0) {
+		snprintf(text, sizeof(text), "%u", baro.failures);
+		line(4, "FAILED", text, "", DRAW_AMBER);
+	}
+	draw_text(0, 92, baro_wanted(BARO_FOR_PAGE) ? "TOP RIGHT: OFF" : "TOP RIGHT: ON", SMALL,
+		  DRAW_DIM, DRAW_CENTRE);
+}
+
 static void paint_ble(void)
 {
 	static const char *const states[] = {"RESET", "START", "ADVERT", "CONN", "FAIL"};
@@ -490,7 +534,8 @@ static void paint_alrt(void)
 static void paint_page(void)
 {
 	static void (*const paint[PAGE_COUNT])(void) = {paint_elec, paint_mcu, paint_stor,
-							paint_gnss, paint_ble,  paint_alrt};
+							paint_gnss, paint_sens, paint_ble,
+							paint_alrt};
 
 	paint[page]();
 }
@@ -515,6 +560,8 @@ static bool page_key(enum ui_key key, bool held)
 	} else if (key == UI_KEY_SELECT && page == PAGE_GNSS) {
 		/* To look at the receiver without recording; see page_leave. */
 		gnss_want(GNSS_FOR_PAGE, !gnss_wanted(GNSS_FOR_PAGE));
+	} else if (key == UI_KEY_SELECT && page == PAGE_SENS) {
+		baro_want(BARO_FOR_PAGE, !baro_wanted(BARO_FOR_PAGE));
 	} else {
 		return key == UI_KEY_SELECT;
 	}
@@ -525,6 +572,7 @@ static bool page_key(enum ui_key key, bool held)
 static void page_leave(void)
 {
 	gnss_want(GNSS_FOR_PAGE, false);
+	baro_want(BARO_FOR_PAGE, false);
 }
 
 static const struct ui_screen page_screen = {

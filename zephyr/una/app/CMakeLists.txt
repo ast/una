@@ -7,6 +7,7 @@ project(una_zephyr)
 target_sources(app PRIVATE
   src/alarm.c
   src/alert.c
+  src/baro.c
   src/clock.c
   src/dial.c
   src/draw.c
@@ -32,6 +33,7 @@ target_sources(app PRIVATE
 if(CONFIG_BOARD_UNA_WATCH)
   target_sources(app PRIVATE
     src/alert_hw.c
+    src/baro_hw.c
     src/bluenrg.c
     src/bluetooth.c
     src/power.c

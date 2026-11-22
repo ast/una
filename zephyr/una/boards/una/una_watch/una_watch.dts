@@ -122,6 +122,8 @@
 		buzzer-en-gpios = <&gpiob 9 GPIO_ACTIVE_HIGH>, <&gpiod 5 GPIO_ACTIVE_HIGH>;
 		/* DRV2625 NRST: low is shutdown. */
 		haptic-enable-gpios = <&gpiof 2 GPIO_ACTIVE_HIGH>;
+		/* ALTIMETER_EN: the barometer's supply. */
+		baro-en-gpios = <&gpiog 0 GPIO_ACTIVE_HIGH>;
 	};
 
 	leds {
@@ -247,6 +249,18 @@ zephyr_udc0: &usbotg_hs {
 };
 
 /*
+ * The barometer's bus: MS5837-02BA at 0x76. The app drives the sensor itself
+ * (src/baro_hw.c), as its supply is switched. The heart-rate sensor is on
+ * this bus too (PAH8316, 0x40), unpowered so far.
+ */
+&i2c2 {
+	pinctrl-0 = <&i2c2_scl_pb13 &i2c2_sda_pb14>;
+	pinctrl-names = "default";
+	clock-frequency = <I2C_BITRATE_FAST>;
+	status = "okay";
+};
+
+/*
  * Main bus: PMIC 0x61, fuel gauge 0x36, USB-C sink 0x29, haptic driver 0x5a,
  * display board EEPROM 0x50. Pulled up on the board.
  */
@@ -298,12 +312,6 @@ zephyr_udc0: &usbotg_hs {
  * boots them. Left floating, the GNSS module's own pull-up turns it on.
  */
 &gpiog {
-	altimeter-en-hog {
-		gpio-hog;
-		gpios = <0 GPIO_ACTIVE_HIGH>;
-		output-low;
-	};
-
 	vled-en-hog {
 		gpio-hog;
 		gpios = <10 GPIO_ACTIVE_HIGH>;

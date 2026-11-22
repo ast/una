@@ -13,6 +13,7 @@
 #include <zephyr/shell/shell.h>
 
 #include "alert.h"
+#include "baro.h"
 #include "bluetooth.h"
 #include "phone.h"
 #include "power.h"
@@ -137,6 +138,43 @@ static void move(struct k_work *work)
 }
 static K_WORK_DELAYABLE_DEFINE(move_work, move);
 
+/*
+ * The barometer is where the receiver is, in weather that makes it read
+ * some tens of metres off, and with a little noise.
+ */
+#define BARO_WEATHER_MM 35000
+
+static bool baro_there = true;
+static bool baro_powered;
+
+int baro_hw_power(bool on)
+{
+	baro_powered = on && baro_there;
+	return on && !baro_there ? -EIO : 0;
+}
+
+int baro_hw_sample(int32_t *pressure_pa, int32_t *temperature_cc)
+{
+	static uint32_t noise = 1;
+	double mm;
+
+	if (!baro_powered || !baro_there) {
+		return -EIO;
+	}
+	noise = noise * 1103515245 + 12345;
+	mm = nav.altitude + BARO_WEATHER_MM + (int)(noise >> 16) % 300 - 150;
+	*pressure_pa = (int32_t)(101325.0 * pow(1.0 - mm / 44330770.0, 1 / 0.190263));
+	*temperature_cc = 2150;
+	return 0;
+}
+
+/* sim baro on | off: there is a sensor, or none answers */
+static int cmd_baro(const struct shell *sh, size_t argc, char **argv)
+{
+	baro_there = strcmp(argv[1], "on") == 0;
+	return 0;
+}
+
 /* sim gps off | <latitude> <longitude> [altitude m] */
 static int cmd_gps(const struct shell *sh, size_t argc, char **argv)
 {
@@ -250,6 +288,7 @@ static int cmd_phone(const struct shell *sh, size_t argc, char **argv)
 SHELL_STATIC_SUBCMD_SET_CREATE(sim_cmds,
 	SHELL_CMD_ARG(battery, NULL, "<percent> <usb power 0|1> [charger state 0-6]", cmd_battery,
 		      3, 1),
+	SHELL_CMD_ARG(baro, NULL, "on | off: the barometer answers, or not", cmd_baro, 2, 0),
 	SHELL_CMD_ARG(gps, NULL, "off | <latitude> <longitude> [altitude m]", cmd_gps, 2, 2),
 	SHELL_CMD_ARG(move, NULL, "<km/h> <heading> [climb m/min]: move from where gps put it",
 		      cmd_move, 3, 1),

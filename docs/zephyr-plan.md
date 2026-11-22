@@ -203,6 +203,15 @@ carries the radio's state, bytes and lines either way and the signal
 strength the chip reports (asked once a minute: a chip that answers has a
 link), failed sends are logged, and so are lines not understood.
 
+Barometer (v0.5.0): the MS5837-02BA is driven by the app (`src/baro.c`,
+`src/baro_hw.c`), not by Zephyr's driver, which reads the calibration at
+boot, when the sensor here has no supply, and without the pause after reset
+or the checksum. On while recording and read once a second at the highest
+oversampling; still on the desk it moves by about 3 Pa, a quarter of a
+metre. Climb is counted from it in steps of 3 m. The altitude in the file is
+the barometer's, moved by the mean difference to the receiver's (the
+weather). Not done: what it costs in current, floors.
+
 A newer chip firmware from ST would pass data in controller-only mode and
 can be loaded over SPI. It is not done: it would change the chip under the
 stock firmware too.

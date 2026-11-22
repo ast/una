@@ -21,6 +21,7 @@
 #include <zephyr/shell/shell.h>
 
 #include "alert.h"
+#include "baro.h"
 #include "clock.h"
 #include "gnss.h"
 #include "record.h"
@@ -40,8 +41,18 @@ LOG_MODULE_REGISTER(record, LOG_LEVEL_INF);
 #define MOVED_M      10
 /* Faster than anything worn on a wrist: a jump, not a move. */
 #define JUMP_M_S     60
-/* Climbing counts in steps of this, which is above the noise of GNSS altitude. */
-#define ASCENT_STEP_MM 5000
+/*
+ * Climbing counts in steps: above the noise of the barometer, or of GNSS
+ * altitude where there is no barometer.
+ */
+#define ASCENT_STEP_MM      3000
+#define ASCENT_STEP_GNSS_MM 5000
+/*
+ * The barometer's height is off by the weather. What it is off by is taken
+ * from the receiver: the mean of the difference, over this many fixes once
+ * there are that many.
+ */
+#define SEA_FIXES 64
 
 enum command {
 	CMD_START,
@@ -69,8 +80,10 @@ static int64_t next_tick_ms;
 static int64_t utc_minus_uptime_s;
 static bool have_point;
 static int64_t point_latitude, point_longitude, point_at_ms;
-static bool have_altitude;
+static bool have_altitude, altitude_by_air;
 static int32_t altitude_ref_mm;
+static int32_t sea_offset_mm;
+static int sea_fixes;
 static uint32_t ascent_mm;
 static uint32_t distance_cm;
 static uint32_t laps;
@@ -240,6 +253,7 @@ static void start(void)
 	now = (struct record_state){.phase = RECORD_RUNNING};
 	have_point = false;
 	have_altitude = false;
+	sea_fixes = 0;
 	ascent_mm = 0;
 	distance_cm = 0;
 	laps = 0;
@@ -254,12 +268,14 @@ static void start(void)
 	}
 	now.saved = ret == 0;
 	gnss_want(GNSS_FOR_RECORD, true);
+	baro_want(BARO_FOR_RECORD, true);
 	next_tick_ms = k_uptime_get() + 1000;
 }
 
 static void finish(void)
 {
 	gnss_want(GNSS_FOR_RECORD, false);
+	baro_want(BARO_FOR_RECORD, false);
 	now.phase = RECORD_IDLE;
 	now.fix = false;
 	now.speed_mm_s = 0;
@@ -277,9 +293,29 @@ static void finish(void)
 	}
 }
 
+/* Height gained: what it rose by, each time it has risen a step from where it turned. */
+static void climb(int32_t altitude_mm, bool by_air)
+{
+	int32_t step = by_air ? ASCENT_STEP_MM : ASCENT_STEP_GNSS_MM;
+
+	if (!have_altitude || by_air != altitude_by_air) {
+		/* The two are not on one scale: start over from this one. */
+		have_altitude = true;
+		altitude_by_air = by_air;
+		altitude_ref_mm = altitude_mm;
+	} else if (altitude_mm >= altitude_ref_mm + step) {
+		ascent_mm += altitude_mm - altitude_ref_mm;
+		altitude_ref_mm = altitude_mm;
+	} else if (altitude_mm <= altitude_ref_mm - step) {
+		altitude_ref_mm = altitude_mm;
+	}
+}
+
 /* A second of recording. */
 static void tick(void)
 {
+	struct baro_reading air;
+	bool have_air = baro_read(&air);
 	uint32_t values[] = {fit_now(), FIT_NO_POSITION, FIT_NO_POSITION, FIT_NONE, FIT_NONE,
 			     FIT_NONE};
 	struct gnss_fix fix;
@@ -310,19 +346,22 @@ static void tick(void)
 				point_at_ms = at_ms;
 			}
 		}
-		if (!have_altitude) {
-			have_altitude = true;
-			altitude_ref_mm = altitude_mm;
-		} else if (altitude_mm >= altitude_ref_mm + ASCENT_STEP_MM) {
-			ascent_mm += altitude_mm - altitude_ref_mm;
-			altitude_ref_mm = altitude_mm;
-		} else if (altitude_mm <= altitude_ref_mm - ASCENT_STEP_MM) {
-			altitude_ref_mm = altitude_mm;
+		if (have_air) {
+			sea_fixes = MIN(sea_fixes + 1, SEA_FIXES);
+			sea_offset_mm += (altitude_mm - air.altitude_mm - sea_offset_mm) / sea_fixes;
+		} else {
+			climb(altitude_mm, false);
 		}
 		values[1] = fit_semicircles(latitude);
 		values[2] = fit_semicircles(longitude);
 		values[4] = speed_mm_s;
 		values[5] = fit_altitude(altitude_mm);
+	}
+	if (have_air) {
+		climb(air.altitude_mm, true);
+		/* Into the file once it is known how far off the weather puts it. */
+		values[5] = sea_fixes > 0 ? fit_altitude(air.altitude_mm + sea_offset_mm)
+					  : FIT_NONE;
 	}
 	values[3] = distance_cm;
 	now.distance_m = distance_cm / 100;
