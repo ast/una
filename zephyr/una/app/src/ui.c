@@ -334,6 +334,39 @@ lv_obj_t *ui_label(const lv_font_t *font, uint32_t rgb, int y)
 	return label;
 }
 
+void ui_readable(char *text)
+{
+	static const uint16_t beyond[] = {0x2013, 0x2014, 0x2018, 0x2019, 0x201c,
+					  0x201d, 0x2022, 0x2026, 0x20ac};
+	const uint8_t *in = (const uint8_t *)text;
+	char *out = text;
+
+	while (*in != '\0') {
+		/* The bytes of this character, and the character. */
+		int n = *in < 0x80 ? 1 : *in < 0xe0 ? 2 : *in < 0xf0 ? 3 : 4;
+		uint32_t c = n == 1 ? *in : *in & (0xff >> (n + 1));
+		bool have;
+
+		for (int i = 1; i < n && (in[i] & 0xc0) == 0x80; i++) {
+			c = c << 6 | (in[i] & 0x3f);
+		}
+		have = c == '\n' || (c >= 0x20 && c <= 0x7e) || (c >= 0xa0 && c <= 0xff);
+		for (int i = 0; i < ARRAY_SIZE(beyond); i++) {
+			have = have || c == beyond[i];
+		}
+		if (have) {
+			for (int i = 0; i < n && *in != '\0'; i++) {
+				*out++ = *in++;
+			}
+		} else {
+			*out++ = '?';
+			for (in++; (*in & 0xc0) == 0x80; in++) {
+			}
+		}
+	}
+	*out = '\0';
+}
+
 void ui_title(const char *title)
 {
 	lv_label_set_text(ui_label(&lv_font_montserrat_14, 0xaaaaaa, -92), title);

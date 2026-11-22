@@ -81,7 +81,7 @@ static char ring_time[6];
 static void ring_enter(void)
 {
 	lv_label_set_text(ui_label(&lv_font_montserrat_48, 0xffffff, -20), ring_time);
-	lv_label_set_text(ui_label(&lv_font_montserrat_20, 0xffff00, 30), ring_title);
+	lv_label_set_text(ui_label(&font_text_20, 0xffff00, 30), ring_title);
 	lv_label_set_text(ui_label(&lv_font_montserrat_14, 0xaaaaaa, 76), "any button: dismiss");
 }
 

@@ -1,0 +1,18 @@
+#!/bin/sh
+# Make the fonts for text that comes from outside the watch (messages):
+# Montserrat as LVGL's own, with Latin-1 and some punctuation besides ASCII.
+# Needs lv_font_conv, which the development shell has.
+set -e
+root=$(cd "$(dirname "$0")/.." && pwd)
+# Relative, as the options end up in a comment in the files.
+cd "$root"
+ttf=zephyr/modules/lib/gui/lvgl/scripts/generators/built_in_font/Montserrat-Medium.ttf
+out=zephyr/una/app/src/fonts
+mkdir -p "$out"
+for size in 14 20; do
+	lv_font_conv --no-compress --no-prefilter --bpp 4 --size $size \
+		--font "$ttf" \
+		-r 0x20-0x7E,0xA0-0xFF,0x2013,0x2014,0x2018,0x2019,0x201C,0x201D,0x2022,0x2026,0x20AC \
+		--format lvgl --force-fast-kern-format --lv-include lvgl.h \
+		--lv-font-name font_text_$size -o "$out/font_text_$size.c"
+done

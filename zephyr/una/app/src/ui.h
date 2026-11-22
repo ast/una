@@ -86,6 +86,15 @@ bool ui_list_key(struct ui_list *list, enum ui_key key);
 /* A label in one of the three fonts, centred on the screen plus an offset. */
 lv_obj_t *ui_label(const lv_font_t *font, uint32_t rgb, int y);
 
+/*
+ * For text from outside the watch: Montserrat like the rest, with Latin-1
+ * and some punctuation besides ASCII (scripts/una-fonts makes them).
+ */
+LV_FONT_DECLARE(font_text_14);
+LV_FONT_DECLARE(font_text_20);
+/* Puts a question mark for every character of UTF-8 text they do not have. */
+void ui_readable(char *text);
+
 /* The small title at the top of a page. */
 void ui_title(const char *title);
 

@@ -395,6 +395,7 @@ static void call(const char *obj)
 		text_of(obj, "number", who, sizeof(who));
 	}
 	snprintf(title, sizeof(title), "%s", who[0] != '\0' ? who : "Call");
+	ui_readable(title);
 	alert_ring(title, 30);
 }
 

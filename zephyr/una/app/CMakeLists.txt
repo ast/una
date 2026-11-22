@@ -12,6 +12,8 @@ target_sources(app PRIVATE
   src/draw.c
   src/face.c
   src/fit.c
+  src/fonts/font_text_14.c
+  src/fonts/font_text_20.c
   src/gnss.c
   src/main.c
   src/messages.c

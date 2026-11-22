@@ -70,11 +70,61 @@ simulator, smpmgr for firmware upload, plus openocd, probe-rs, tio and clangd.
   gauge's charge estimate: its own figure stays at 100 for the first tenth
   of a discharge, see `charge()` in `src/power.c`), power-off, Stop mode whenever idle and off
   USB: about 0.85 mA idle, a week on a charge (measured at v0.1.0).
-- Clock from the RTC with a stored UTC offset, set from the computer.
+- Clock from the RTC with a stored UTC offset, set from the computer or by
+  the phone.
 - Log files on the eMMC with a telemetry line a minute.
 - Firmware update over USB with automatic rollback; a simulator.
-- Not yet: the sensors, pairing (see Phone). The plan
-  is [docs/zephyr-plan.md](docs/zephyr-plan.md).
+- The plan is [docs/zephyr-plan.md](docs/zephyr-plan.md).
+
+## Hardware: what works and what is left
+
+Every part of the watch, and how far this firmware drives it. The pins and
+addresses are in `zephyr/una/boards/una/una_watch/una_watch.dts` and, for
+what is not driven yet, in [docs/zephyr-plan.md](docs/zephyr-plan.md); the
+stock firmware's source (`refs/una-kernel-public`) is the reference for
+each of them.
+
+| Part | State | What works | What is left |
+|---|---|---|---|
+| STM32U5A5 MCU | works | clocks, RTC, watchdog, Stop 2 when idle | idle draws about 1 mA, the stock firmware 0.07 to 0.08: see below |
+| Display, Sharp LS012B7DD06A | works | own driver (`zephyr/una/drivers/display`), LVGL, backlight | |
+| Buttons, four | works | press and hold, wake from Stop | |
+| USB-C, high speed | works | shell and firmware update on two serial ports; off on battery | the volume as a USB drive |
+| eMMC, 4 GB | works | the stock user volume (exFAT): logs and recordings | |
+| PMIC and charger, PCA9420 | works | charger state and limit read, power off (registers, in `src/power.c`) | |
+| Fuel gauge, MAX17262 | works | percentage, voltage, current, charge | its model is the stock one and reads full too long: worked around in `charge()` |
+| Buzzer | works | timer, alarm, calls | |
+| Vibration motor, DRV2625 | works | nudges and ringing, open loop (`src/alert_hw.c`) | its calibrated closed-loop mode |
+| GPS, Airoha AG3335M | works | own driver (`zephyr/una/drivers/gnss`): fix in about a minute, position, speed, satellites | assisted start (EPO), a whole track checked outdoors, the count of satellites heard is too low |
+| Bluetooth, ST BlueNRG-2N | works | the chip's own stack over SPI (`src/bluenrg.c`): one serial service, Gadgetbridge | pairing; see Phone |
+| USB-C controller, STUSB4500 | not driven | charges at its defaults | reading what the cable offers |
+| Barometer, MS5837 | not driven | | altitude and climb for recordings; Zephyr has a driver; I2C2 0x76, supply on PG0 |
+| Accelerometer and gyro, BMI270 | not driven | | steps, wrist wake, cadence; Zephyr's driver lacks the step counter; I2C4 0x68, interrupt PA1 |
+| Magnetometer, BMM350 | not driven | | compass; Zephyr has a driver; I2C4 0x14, interrupt PC2 |
+| Heart rate, PixArt PAH8316 | not driven | | PixArt's algorithm is a closed library in the stock source; an open driver would be new work; I2C2 0x40, supplies on PF13 and PG10 |
+
+The parts that are not driven have their supplies held off.
+
+What is left besides the parts, roughly in the order it would be missed:
+
+- **Idle current.** About 1 mA with the CPU asleep 99.9 % of the time, so
+  something draws while in Stop: a week on a charge, where the stock
+  firmware's idle figure would allow many times that. Suspects and a way to
+  measure them are in the plan.
+- **Pairing.** Any phone in range can connect to the watch (see Phone).
+- **Altitude gain** in recordings, from the barometer.
+- **Steps and daily health**, from the accelerometer, and heart rate.
+- **More from the phone**: music control, weather, calendar, answering or
+  rejecting a call. Gadgetbridge sends them already; `src/phone.c` ignores
+  what it does not know.
+- **Long messages** are cut off at six lines; they should scroll.
+- **Firmware update over Bluetooth.** Over USB only today.
+- **Assisted GPS data**, for a first fix in seconds.
+- **Apps loaded from the eMMC** (Zephyr's LLEXT), far off.
+
+Help is welcome with any of it. The simulator runs everything but the
+hardware itself, so the pages and the phone protocol can be worked on
+without a watch.
 
 The version is in `zephyr/una/app/VERSION` and shown on the MCU system page.
 
@@ -249,8 +299,9 @@ holds the chip in reset; `una-z sh radio` shows the state, as does the BLE
 system page.
 
 Not done yet: pairing. Any phone in range can connect and send the watch a
-time or a message; nothing can be read from it but version and battery. The
-fonts have ASCII only, so a letter with an accent is shown without it.
+time or a message; nothing can be read from it but version and battery. Text
+from the phone is shown in fonts that have Latin-1 besides ASCII (made by
+`scripts/una-fonts`); a character beyond that is a question mark.
 
 ## Watch faces
 

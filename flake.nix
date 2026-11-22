@@ -42,6 +42,9 @@
             ]
           ))
 
+          # scripts/una-fonts
+          lv_font_conv
+
           # The simulator (Zephyr's native_sim, host build)
           gcc
           SDL2
