@@ -206,6 +206,7 @@ void bluetooth_status(struct bluetooth_status *status)
 		.mtu = 131,
 		.rx_bytes = phone_rx_bytes,
 		.tx_bytes = phone_tx_bytes,
+		.rssi = phone_there ? -60 : 0,
 	};
 }
 

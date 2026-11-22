@@ -34,6 +34,8 @@ struct bluetooth_status {
 	uint32_t connects;    /* since boot */
 	uint32_t rx_bytes;
 	uint32_t tx_bytes;
+	int8_t rssi;          /* dBm as the chip last heard the phone; 0 when not known */
+	int rssi_status;      /* what the chip answered when asked: 0, its status, or -errno */
 };
 
 void bluetooth_status(struct bluetooth_status *status);

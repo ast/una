@@ -446,6 +446,10 @@ static void paint_ble(void)
 		/* Connected is not yet talking: Gadgetbridge has to open the line. */
 		line(1, "PHONE", ble.listening ? "LINK" : "NO LINK", "",
 		     ble.listening ? DRAW_GREEN : DRAW_AMBER);
+		if (ble.listening && ble.rssi != 0) {
+			snprintf(text, sizeof(text), "%d", ble.rssi);
+			figure(40, -62 + 1 * 21, "", text, "dBm", DRAW_GREEN);
+		}
 		snprintf(text, sizeof(text), "%u", ble.interval_ms);
 		line(2, "PACE", text, "ms", DRAW_GREEN);
 		snprintf(text, sizeof(text), "%u", ble.latency);

@@ -194,6 +194,15 @@ notifications, calls and find, version and battery. Next: pairing (the chip
 keeps the bonds; passkey shown on the watch), a font with more than ASCII,
 music control and weather, what the connection costs in current.
 
+Open: on 22 Nov, after a link lost out of range and made again by the phone
+four minutes later, the opening went as usual (clock set) and then nothing
+arrived for 95 minutes, though the phone had notifications and both sides
+showed the connection. Bluetooth off and on at the watch mended it. Nothing
+in the log told which side had stopped, so the line logged every minute now
+carries the radio's state, bytes and lines either way and the signal
+strength the chip reports (asked once a minute: a chip that answers has a
+link), failed sends are logged, and so are lines not understood.
+
 A newer chip firmware from ST would pass data in controller-only mode and
 can be loaded over SPI. It is not done: it would change the chip under the
 stock firmware too.

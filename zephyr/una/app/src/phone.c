@@ -459,6 +459,7 @@ static void handle_line(char *text)
 	}
 	if (strncmp(text, "GB(", 3) != 0 || text[3] != '{') {
 		status.unknown++;
+		LOG_INF("not understood: %.32s", text);
 		return;
 	}
 	obj = text + 3;
@@ -475,7 +476,7 @@ static void handle_line(char *text)
 		say("{\"t\":\"gps_power\",\"status\":false}");
 	} else {
 		status.unknown++;
-		LOG_DBG("not understood: %s", type);
+		LOG_INF("not understood: type %s", type);
 	}
 }
 

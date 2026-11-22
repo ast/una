@@ -23,6 +23,7 @@
 #include <zephyr/shell/shell.h>
 #include <zephyr/sys/byteorder.h>
 
+#include "bluetooth.h"
 #include "phone.h"
 #include "power.h"
 
@@ -271,6 +272,8 @@ static void telemetry(const struct power_status *st, int32_t mean_ua)
 	k_thread_runtime_stats_t cpu;
 	struct rtc_time t = {0};
 	uint32_t awake_permille = 0;
+	struct bluetooth_status bt;
+	struct phone_status phone;
 
 	if (k_thread_runtime_stats_cpu_get(0, &cpu) == 0) {
 		uint64_t busy = cpu.total_cycles - last_busy;
@@ -285,19 +288,30 @@ static void telemetry(const struct power_status *st, int32_t mean_ua)
 	(void)rtc_get_time(rtc, &t);
 	phone_battery(st->percent, st->usb_power && st->microamps > 0, st->millivolts);
 
+	bluetooth_status(&bt);
+	phone_status(&phone);
+
 	/*
 	 * soc is the percentage shown, cap the charge it is made from; rep is
 	 * the gauge's own percentage and qh its plain coulomb counter (0.5 mAh
 	 * a step), to check the first against. See charge().
+	 *
+	 * bt is the radio: off, starting, advertising, connected (C when the
+	 * phone has opened the serial line), failed. rx, tx and ln count bytes
+	 * and lines since boot; rssi is 0 when not known, and a ! after it says
+	 * the chip did not answer for it.
 	 */
 	LOG_INF("tm %04d-%02d-%02dT%02d:%02d:%02dZ usb=%d soc=%d cap=%d/%d rep=%d qh=%d mv=%d ua=%d "
-		"chg=%u stops=%u awake=%u/1000 keys=%ld backlight_ms=%ld",
+		"chg=%u stops=%u awake=%u/1000 keys=%ld backlight_ms=%ld "
+		"bt=%c rx=%u tx=%u ln=%u rssi=%d%s",
 		t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec,
 		st->usb_power, st->percent, st->remaining_mah, st->full_mah, st->gauge_percent,
 		gauge_qh(),
 		st->millivolts, mean_ua, st->charger_state,
 		stop_entries - last_stop_entries, awake_permille,
-		(long)atomic_clear(&usage_key_presses), (long)atomic_clear(&usage_backlight_ms));
+		(long)atomic_clear(&usage_key_presses), (long)atomic_clear(&usage_backlight_ms),
+		bt.state == BLUETOOTH_CONNECTED && bt.listening ? 'C' : "osacf"[bt.state],
+		bt.rx_bytes, bt.tx_bytes, phone.lines, bt.rssi, bt.rssi_status != 0 ? "!" : "");
 	minute_awake_permille = awake_permille;
 	minute_stops = stop_entries - last_stop_entries;
 	last_stop_entries = stop_entries;

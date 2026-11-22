@@ -31,6 +31,7 @@ LOG_MODULE_REGISTER(bluetooth, LOG_LEVEL_INF);
 
 /* HCI's own commands */
 #define LE_SET_SCAN_RESPONSE BLUENRG_OP(0x08, 0x009)
+#define READ_RSSI            BLUENRG_OP(0x05, 0x005)
 /* ST's */
 #define HAL_FIRMWARE_DETAILS BLUENRG_ACI(0x001)
 #define HAL_WRITE_CONFIG     BLUENRG_ACI(0x00c)
@@ -87,6 +88,13 @@ LOG_MODULE_REGISTER(bluetooth, LOG_LEVEL_INF);
 #define SLOW_LATENCY      4
 #define SLOW_TIMEOUT      600
 
+/*
+ * How well the phone is heard, asked of the chip now and then. It is in the
+ * log every minute: a chip that answers still has a link, whatever else.
+ */
+#define RSSI_EVERY_MS 60000
+#define RSSI_UNKNOWN  127
+
 static uint8_t set_on = 1;
 static bool tried;
 
@@ -97,6 +105,9 @@ static uint16_t conn, interval, latency, mtu;
 static uint8_t peer[6], own[6];
 static int64_t connected_at_ms;
 static uint32_t connects, rx_bytes, tx_bytes;
+static int64_t rssi_at_ms;
+static int rssi_status;
+static int8_t rssi;
 
 static uint16_t nus, nus_tx, nus_rx;
 
@@ -268,6 +279,25 @@ static void slow_down(void)
 	slow = true;
 }
 
+static void read_rssi(void)
+{
+	uint8_t p[2];
+	uint8_t rsp[3] = {0, 0, RSSI_UNKNOWN};
+	int ret;
+
+	sys_put_le16(conn, p);
+	ret = bluenrg_cmd(READ_RSSI, p, sizeof(p), rsp, sizeof(rsp));
+	if (ret != 0 && ret != rssi_status) {
+		LOG_WRN("signal strength: %s 0x%02x", ret < 0 ? "error" : "status",
+			ret < 0 ? -ret : ret);
+	}
+	K_SPINLOCK(&lock) {
+		rssi_status = ret;
+		rssi = ret == 0 && rsp[2] != RSSI_UNKNOWN ? (int8_t)rsp[2] : 0;
+	}
+	rssi_at_ms = k_uptime_get();
+}
+
 static void on_connected(const uint8_t *d, size_t len, bool enhanced)
 {
 	const uint8_t *pace = &d[enhanced ? 23 : 11];
@@ -288,6 +318,10 @@ static void on_connected(const uint8_t *d, size_t len, bool enhanced)
 		slow = false;
 		connected_at_ms = k_uptime_get();
 		connects++;
+		rssi = 0;
+		rssi_status = 0;
+		/* First asked once the phone has said what it had to say. */
+		rssi_at_ms = connected_at_ms + SLOW_AFTER_MS + 5000 - RSSI_EVERY_MS;
 	}
 	LOG_INF("connected: %02X:%02X:%02X:%02X:%02X:%02X, interval %u ms", peer[5], peer[4],
 		peer[3], peer[2], peer[1], peer[0], interval * 5 / 4);
@@ -393,6 +427,10 @@ bool bluetooth_send(const void *data, size_t len)
 			k_msleep(10);
 		}
 		if (ret != 0) {
+			if (ret != -ENOTCONN) {
+				LOG_WRN("send of %u bytes: %s 0x%02x", (unsigned int)n,
+					ret < 0 ? "error" : "status", ret < 0 ? -ret : ret);
+			}
 			return false;
 		}
 		tx_bytes += n;
@@ -427,6 +465,8 @@ void bluetooth_status(struct bluetooth_status *status)
 		status->latency = latency;
 		status->mtu = mtu;
 		status->connected_s = (k_uptime_get() - connected_at_ms) / 1000;
+		status->rssi = rssi;
+		status->rssi_status = rssi_status;
 	}
 }
 
@@ -460,7 +500,7 @@ static void bluetooth_thread(void *p1, void *p2, void *p3)
 
 	bluenrg_stop();
 	while (true) {
-		k_timeout_t wait = K_FOREVER;
+		int64_t wait_ms = INT64_MAX;
 
 		if (on && state == BLUETOOTH_OFF) {
 			/* The chip restarted: start over. */
@@ -488,9 +528,18 @@ static void bluetooth_thread(void *p1, void *p2, void *p3)
 				slow_down();
 				continue;
 			}
-			wait = K_MSEC(left);
+			wait_ms = left;
 		}
-		if (bluenrg_event(&ev, wait)) {
+		if (connected) {
+			int64_t left = rssi_at_ms + RSSI_EVERY_MS - k_uptime_get();
+
+			if (left <= 0) {
+				read_rssi();
+				continue;
+			}
+			wait_ms = MIN(wait_ms, left);
+		}
+		if (bluenrg_event(&ev, wait_ms == INT64_MAX ? K_FOREVER : K_MSEC(wait_ms))) {
 			on_event(&ev);
 		}
 	}
@@ -513,9 +562,9 @@ static int cmd_radio(const struct shell *sh, size_t argc, char **argv)
 		    s.peer[0] ? s.peer : "none", s.listening ? ", serial line open" : "");
 	shell_print(sh,
 		    "interval %u ms, latency %u, mtu %u, connected %u s, %u connects, "
-		    "rx %u tx %u bytes",
+		    "rx %u tx %u bytes, rssi %d dBm (status %d)",
 		    s.interval_ms, s.latency, s.mtu, s.connected_s, s.connects, s.rx_bytes,
-		    s.tx_bytes);
+		    s.tx_bytes, s.rssi, s.rssi_status);
 	return 0;
 }
 SHELL_CMD_ARG_REGISTER(radio, NULL, "Bluetooth state, or turn it on or off: radio [on|off]",
