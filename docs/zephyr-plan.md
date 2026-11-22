@@ -249,7 +249,7 @@ while it is shown: 12.5 readings a second, each the mean of four. The
 heading is of twelve o'clock, from magnetic north, with the tilt taken out
 by the accelerometer (which the step counter keeps running); while the
 wrist is shaken it stays what it was. The watch's own field is found by
-turning it every way (hold top right on the page): the middle of the least
+turning it every way (top right on the page begins it): the middle of the least
 and most each axis has read, kept in settings. Checked on the watch: the
 chip starts, reads steadily to within half a microtesla, suspends when the
 page is left; lying on the desk it reads 135 53 -46 uT, of which the -46 is

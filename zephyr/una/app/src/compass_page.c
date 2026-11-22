@@ -1,6 +1,7 @@
 /*
  * The compass page: where twelve o'clock points, and a rose that stays put
- * while the watch is turned under it. Holding SELECT calibrates.
+ * while the watch is turned under it. SELECT begins a calibration, which ends
+ * by itself, or with SELECT again.
  */
 
 #include <stdio.h>
@@ -79,8 +80,8 @@ static void paint(void)
 		draw_text(0, 24, points[(reading.heading_deg * 2 + 22) / 45 % 16], TEXT, DRAW_DIM,
 			  DRAW_CENTRE);
 	} else {
-		draw_text(0, 22, "HOLD TOP RIGHT", SMALL, DRAW_AMBER, DRAW_CENTRE);
-		draw_text(0, 36, "TO CALIBRATE", SMALL, DRAW_AMBER, DRAW_CENTRE);
+		draw_text(0, 22, "TOP RIGHT:", SMALL, DRAW_AMBER, DRAW_CENTRE);
+		draw_text(0, 36, "CALIBRATE", SMALL, DRAW_AMBER, DRAW_CENTRE);
 	}
 }
 
@@ -104,7 +105,8 @@ static bool compass_key(enum ui_key key, bool held)
 	if (key != UI_KEY_SELECT) {
 		return false;
 	}
-	if (held || status.calibrating) {
+	/* A press, not a hold: both hands are for turning the watch. */
+	if (!held) {
 		compass_calibrate(!status.calibrating);
 	}
 	return true;
