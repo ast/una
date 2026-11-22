@@ -261,9 +261,10 @@ zephyr_udc0: &usbotg_hs {
 };
 
 /*
- * The motion sensors' bus: BMI270 at 0x68 and the magnetometer (BMM350,
- * 0x14, interrupt on PC2), which is not driven. Both have their supply
- * whenever the watch has: left alone they sleep, at a few microamps.
+ * The motion sensors' bus: BMI270 at 0x68 and the magnetometer, BMM350, at
+ * 0x14. Both have their supply whenever the watch has, and sleep at a few
+ * microamps when nothing is asked of them. Both are started by the app, not
+ * at boot.
  */
 &i2c4 {
 	pinctrl-0 = <&i2c4_scl_pd12 &i2c4_sda_pd13>;
@@ -284,6 +285,18 @@ zephyr_udc0: &usbotg_hs {
 		axes = <1 0 2>;
 		axes-inverted = <1 0 0>;
 		wrist-wake-params = <1024 1774 1024 700 179 1925>;
+		zephyr,deferred-init;
+	};
+
+	/*
+	 * src/compass_hw.c. Its interrupt (PC2) is not used. The mounting is
+	 * the stock firmware's, measured on the watch.
+	 */
+	magnetometer: bmm350@14 {
+		compatible = "una,bmm350";
+		reg = <0x14>;
+		axes = <1 0 2>;
+		axes-inverted = <0 0 1>;
 		zephyr,deferred-init;
 	};
 };

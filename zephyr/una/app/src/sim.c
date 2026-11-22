@@ -15,6 +15,7 @@
 #include "alert.h"
 #include "baro.h"
 #include "bluetooth.h"
+#include "compass.h"
 #include "motion.h"
 #include "phone.h"
 #include "power.h"
@@ -195,6 +196,11 @@ int motion_hw_read(uint32_t *count, enum motion_activity *activity, int32_t acce
 	*count = steps;
 	*activity = steps != last ? MOTION_WALKING : MOTION_STILL;
 	last = steps;
+	return motion_hw_accel(accel_mg);
+}
+
+int motion_hw_accel(int32_t accel_mg[3])
+{
 	accel_mg[0] = 0;
 	accel_mg[1] = 0;
 	accel_mg[2] = 1000;
@@ -221,6 +227,39 @@ static int cmd_wrist(const struct shell *sh, size_t argc, char **argv)
 	if (wrist_on) {
 		motion_wrist_turned();
 	}
+	return 0;
+}
+
+/*
+ * The magnetometer: the field of Stockholm, 16 uT of it level and 49 down,
+ * about a watch that lies on its back with twelve o'clock where it is told.
+ */
+static int compass_deg;
+static bool compass_powered;
+
+int compass_hw_power(bool on)
+{
+	compass_powered = on;
+	return 0;
+}
+
+int compass_hw_sample(int32_t field_nt[3])
+{
+	double heading = compass_deg * 3.14159265358979323846 / 180;
+
+	if (!compass_powered) {
+		return -EIO;
+	}
+	field_nt[0] = (int32_t)(-16000 * sin(heading));
+	field_nt[1] = (int32_t)(16000 * cos(heading));
+	field_nt[2] = -49000;
+	return 0;
+}
+
+/* sim compass <degrees>: where twelve o'clock points */
+static int cmd_compass(const struct shell *sh, size_t argc, char **argv)
+{
+	compass_deg = atoi(argv[1]);
 	return 0;
 }
 
@@ -338,6 +377,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sim_cmds,
 	SHELL_CMD_ARG(battery, NULL, "<percent> <usb power 0|1> [charger state 0-6]", cmd_battery,
 		      3, 1),
 	SHELL_CMD_ARG(baro, NULL, "on | off: the barometer answers, or not", cmd_baro, 2, 0),
+	SHELL_CMD_ARG(compass, NULL, "<degrees>: where twelve o'clock points", cmd_compass, 2, 0),
 	SHELL_CMD_ARG(gps, NULL, "off | <latitude> <longitude> [altitude m]", cmd_gps, 2, 2),
 	SHELL_CMD_ARG(move, NULL, "<km/h> <heading> [climb m/min]: move from where gps put it",
 		      cmd_move, 3, 1),

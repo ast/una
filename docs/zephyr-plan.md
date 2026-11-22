@@ -232,6 +232,32 @@ lost at a restart (the driver resets the chip), nothing shows or stores the
 steps but the shell and the log, cadence, what it costs in current (the
 datasheet has some tens of microamps).
 
+Magnetometer: the BMM350 too has a driver in this tree
+(`zephyr/una/drivers/sensor/bmm350`, compatible `una,bmm350`), made of
+Zephyr's. Zephyr's is built on RTIO and selects `I2C_RTIO`, which changes
+the I2C controller's driver under every part on every bus; it leaves the
+chip measuring from the start, to be stopped only through device power
+management, which is not on here; and it gives the field in whole
+microtesla, where the level part of the earth's is 16 in Stockholm. This
+one is plain I2C, suspended until a rate is set, works the field out as
+Bosch's code does, in nanotesla, and turns it into the watch's frame (the
+stock firmware's mounting: x is the chip's y, y its x, z its -z). Left out:
+I3C, streaming, the data-ready interrupt, the self-test.
+
+The compass (`src/compass.c`, a page in the ring) has the sensor on only
+while it is shown: 12.5 readings a second, each the mean of four. The
+heading is of twelve o'clock, from magnetic north, with the tilt taken out
+by the accelerometer (which the step counter keeps running); while the
+wrist is shaken it stays what it was. The watch's own field is found by
+turning it every way (hold top right on the page): the middle of the least
+and most each axis has read, kept in settings. Checked on the watch: the
+chip starts, reads steadily to within half a microtesla, suspends when the
+page is left; lying on the desk it reads 135 53 -46 uT, of which the -46 is
+the earth's field going down and most of the rest must be the watch's own.
+Not checked: the calibration, and the heading against a compass, which need
+the watch turned by hand. Not done: true north, a fit better than least and
+most (the stock firmware fits an ellipsoid), the current it costs.
+
 A newer chip firmware from ST would pass data in controller-only mode and
 can be loaded over SPI. It is not done: it would change the chip under the
 stock firmware too.

@@ -9,6 +9,8 @@ target_sources(app PRIVATE
   src/alert.c
   src/baro.c
   src/clock.c
+  src/compass.c
+  src/compass_page.c
   src/dial.c
   src/draw.c
   src/face.c
@@ -37,6 +39,7 @@ if(CONFIG_BOARD_UNA_WATCH)
     src/baro_hw.c
     src/bluenrg.c
     src/bluetooth.c
+    src/compass_hw.c
     src/motion_hw.c
     src/power.c
     src/storage.c

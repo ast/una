@@ -44,6 +44,8 @@ void motion_set_wrist_light(bool on);
  */
 int motion_hw_start(void);
 int motion_hw_read(uint32_t *steps, enum motion_activity *activity, int32_t accel_mg[3]);
+/* The acceleration alone, for whoever needs to know which way is down. */
+int motion_hw_accel(int32_t accel_mg[3]);
 int motion_hw_wrist(bool on);
 /* Called by it, from any thread, when the wrist is turned. */
 void motion_wrist_turned(void);

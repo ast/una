@@ -1,0 +1,24 @@
+description: |
+  Bosch BMM350 magnetometer on I2C. This tree's driver
+  (drivers/sensor/bmm350), made of Zephyr's for "bosch,bmm350".
+
+  The chip is suspended, at a few microamps, until a sampling frequency is
+  set, and again when that is set to 0. Starting the driver takes a tenth
+  of a second: with zephyr,deferred-init that is not spent at boot.
+
+compatible: "una,bmm350"
+
+include: [sensor-device.yaml, i2c-device.yaml]
+
+properties:
+  axes:
+    type: array
+    default: [0, 1, 2]
+    description: |
+      For each axis of the device, x y z, the axis of the chip (0 x, 1 y,
+      2 z) that lies along it. The field is given in the device's frame.
+
+  axes-inverted:
+    type: array
+    default: [0, 0, 0]
+    description: For each axis of the device, 1 when the chip's points the other way.

@@ -50,6 +50,9 @@ int motion_hw_start(void)
 	if (ret != 0 && ret != -EALREADY) {
 		return ret;
 	}
+	if (!device_is_ready(imu)) {
+		return -ENODEV;
+	}
 	ret = sensor_attr_set(imu, SENSOR_CHAN_ACCEL_XYZ, SENSOR_ATTR_FULL_SCALE, &range);
 	if (ret == 0) {
 		ret = enable(BMI270_CHAN_STEPS);
@@ -60,14 +63,33 @@ int motion_hw_start(void)
 	return ret;
 }
 
+int motion_hw_accel(int32_t accel_mg[3])
+{
+	struct sensor_value accel[3];
+	int ret;
+
+	if (!device_is_ready(imu)) {
+		return -ENODEV;
+	}
+	ret = sensor_sample_fetch_chan(imu, SENSOR_CHAN_ACCEL_XYZ);
+	if (ret != 0) {
+		return ret;
+	}
+	(void)sensor_channel_get(imu, SENSOR_CHAN_ACCEL_XYZ, accel);
+	for (int i = 0; i < 3; i++) {
+		accel_mg[i] = (int32_t)(sensor_value_to_micro(&accel[i]) * 1000 / SENSOR_G);
+	}
+	return 0;
+}
+
 int motion_hw_read(uint32_t *steps, enum motion_activity *activity, int32_t accel_mg[3])
 {
-	struct sensor_value value, accel[3];
+	struct sensor_value value;
 	int ret;
 
 	ret = sensor_sample_fetch_chan(imu, (enum sensor_channel)BMI270_CHAN_STEPS);
 	if (ret == 0) {
-		ret = sensor_sample_fetch_chan(imu, SENSOR_CHAN_ACCEL_XYZ);
+		ret = motion_hw_accel(accel_mg);
 	}
 	if (ret != 0) {
 		return ret;
@@ -76,10 +98,6 @@ int motion_hw_read(uint32_t *steps, enum motion_activity *activity, int32_t acce
 	*steps = value.val1;
 	(void)sensor_channel_get(imu, (enum sensor_channel)BMI270_CHAN_ACTIVITY, &value);
 	*activity = value.val1;
-	(void)sensor_channel_get(imu, SENSOR_CHAN_ACCEL_XYZ, accel);
-	for (int i = 0; i < 3; i++) {
-		accel_mg[i] = (int32_t)(sensor_value_to_micro(&accel[i]) * 1000 / SENSOR_G);
-	}
 	return 0;
 }
 
