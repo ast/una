@@ -1,0 +1,44 @@
+#ifndef UNA_BLUETOOTH_H_
+#define UNA_BLUETOOTH_H_
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+/*
+ * The radio: on or off as set, advertising until the phone connects, and a
+ * serial line to the phone (the Nordic UART service) once it has.
+ */
+
+/* Stored. Returns at once; the radio follows within a few seconds. */
+void bluetooth_set(bool on);
+bool bluetooth_is_set(void);
+
+enum bluetooth_state {
+	BLUETOOTH_OFF,       /* chip held in reset */
+	BLUETOOTH_STARTING,
+	BLUETOOTH_ADVERTISING,
+	BLUETOOTH_CONNECTED,
+	BLUETOOTH_FAILED,    /* the chip did not start */
+};
+
+struct bluetooth_status {
+	enum bluetooth_state state;
+	bool listening;       /* the phone has opened the serial line */
+	char peer[18];        /* its address, "" when not connected */
+	char own[18];
+	uint16_t interval_ms; /* connection interval */
+	uint16_t latency;
+	uint16_t mtu;
+	uint32_t connected_s; /* for how long */
+	uint32_t connects;    /* since boot */
+	uint32_t rx_bytes;
+	uint32_t tx_bytes;
+};
+
+void bluetooth_status(struct bluetooth_status *status);
+
+/* To the phone, in as many notifications as it takes. False when nobody listens. */
+bool bluetooth_send(const void *data, size_t len);
+
+#endif

@@ -173,6 +173,31 @@ Still to be confirmed by a day of wear: the telemetry line carries `soc`,
   `refs/una-kernel-public/Software/ThirdParty/VendorLib/lib/libuna_vendor.a`
   when present and publishes HR and worn state; off by default so a clean
   clone builds. Check ABI (hard float, newlib symbols) as the first step.
+### Status after v0.4.0 (22 Nov 2026)
+
+The GPS receiver gets a first fix in about a minute outdoors (the SoC has
+to stay out of Stop mode from before the first command to it).
+
+Bluetooth did not go as phase 0 concluded. The BlueNRG-2N accepts the switch
+to controller-only mode and connects, but its factory firmware (DTM 3.2.0,
+stack 2.1c) passes no data either way: ST's DTM of that generation builds
+the ACL path only with `LL_ONLY`, and this image is not built so. The spike
+had only checked that a laptop connects. Zephyr's host is therefore not
+used. The watch drives the chip's own stack with ST's ACI commands, as the
+stock kernel does, through a layer of its own (`src/bluenrg.c`,
+`src/bluetooth.c`); ST's X-CUBE-BLE2 sources gave the command layouts.
+Phase 5 changes with it: no Zephyr GATT services and no mcumgr over
+Bluetooth; the phone is spoken to in Gadgetbridge's Bangle.js protocol over
+the Nordic UART service (`src/phone.c`), which carries time, notifications,
+calls, find, battery and more without further services. Done: time,
+notifications, calls and find, version and battery. Next: pairing (the chip
+keeps the bonds; passkey shown on the watch), a font with more than ASCII,
+music control and weather, what the connection costs in current.
+
+A newer chip firmware from ST would pass data in controller-only mode and
+can be loaded over SPI. It is not done: it would change the chip under the
+stock firmware too.
+
 - Daily health service: steps, floors, active minutes, average and resting
   HR, per-minute HR, stored per day on the eMMC in the stock JSON layout.
 - Glances: steps, floors, HR, active minutes.

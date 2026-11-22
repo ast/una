@@ -76,32 +76,41 @@ static int clock_init(void)
 }
 SYS_INIT(clock_init, APPLICATION, 96);
 
+int clock_set(time_t utc_s, int offset_min)
+{
+	struct rtc_time rt = {0};
+	struct tm utc;
+
+	gmtime_r(&utc_s, &utc);
+	rt.tm_year = utc.tm_year;
+	rt.tm_mon = utc.tm_mon;
+	rt.tm_mday = utc.tm_mday;
+	rt.tm_hour = utc.tm_hour;
+	rt.tm_min = utc.tm_min;
+	rt.tm_sec = utc.tm_sec;
+	rt.tm_wday = utc.tm_wday;
+	if (rtc_set_time(rtc, &rt) != 0) {
+		return -EIO;
+	}
+	if (offset_min != tz_min) {
+		tz_min = offset_min;
+		settings_save_one("una/tz_min", &tz_min, sizeof(tz_min));
+	}
+	alarm_clock_changed();
+	ui_refresh();
+	return 0;
+}
+
 /* clock [set <seconds since 1970 UTC> <offset minutes>] */
 static int cmd_clock(const struct shell *sh, size_t argc, char **argv)
 {
 	struct tm local;
 
 	if (argc == 4) {
-		time_t t = strtoll(argv[2], NULL, 10);
-		struct tm utc;
-		struct rtc_time rt = {0};
-
-		gmtime_r(&t, &utc);
-		rt.tm_year = utc.tm_year;
-		rt.tm_mon = utc.tm_mon;
-		rt.tm_mday = utc.tm_mday;
-		rt.tm_hour = utc.tm_hour;
-		rt.tm_min = utc.tm_min;
-		rt.tm_sec = utc.tm_sec;
-		rt.tm_wday = utc.tm_wday;
-		if (rtc_set_time(rtc, &rt) != 0) {
+		if (clock_set(strtoll(argv[2], NULL, 10), atoi(argv[3])) != 0) {
 			shell_error(sh, "the RTC refused that time");
 			return -EIO;
 		}
-		tz_min = atoi(argv[3]);
-		settings_save_one("una/tz_min", &tz_min, sizeof(tz_min));
-		alarm_clock_changed();
-		ui_refresh();
 	} else if (argc != 1) {
 		shell_error(sh, "usage: clock [set <seconds since 1970 UTC> <offset minutes>]");
 		return -EINVAL;

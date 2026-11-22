@@ -14,6 +14,8 @@ target_sources(app PRIVATE
   src/fit.c
   src/gnss.c
   src/main.c
+  src/messages.c
+  src/phone.c
   src/record.c
   src/record_page.c
   src/screenshot.c
@@ -28,6 +30,7 @@ target_sources(app PRIVATE
 if(CONFIG_BOARD_UNA_WATCH)
   target_sources(app PRIVATE
     src/alert_hw.c
+    src/bluenrg.c
     src/bluetooth.c
     src/power.c
     src/storage.c

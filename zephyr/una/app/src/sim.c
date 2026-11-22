@@ -13,6 +13,8 @@
 #include <zephyr/shell/shell.h>
 
 #include "alert.h"
+#include "bluetooth.h"
+#include "phone.h"
 #include "power.h"
 #include "storage.h"
 #include "ui.h"
@@ -171,12 +173,86 @@ static int cmd_state(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+/*
+ * The radio: on or off as set, and a phone that is there when the simulator
+ * is told so. What the watch sends it is logged.
+ */
+
+static bool radio_on = true, phone_there;
+static uint32_t phone_rx_bytes, phone_tx_bytes;
+
+void bluetooth_set(bool on)
+{
+	radio_on = on;
+	phone_there = phone_there && on;
+	ui_refresh();
+}
+
+bool bluetooth_is_set(void)
+{
+	return radio_on;
+}
+
+void bluetooth_status(struct bluetooth_status *status)
+{
+	*status = (struct bluetooth_status){
+		.state = !radio_on     ? BLUETOOTH_OFF
+			 : phone_there ? BLUETOOTH_CONNECTED
+				       : BLUETOOTH_ADVERTISING,
+		.listening = phone_there,
+		.own = "C0:FF:EE:00:00:01",
+		.interval_ms = 200,
+		.latency = 4,
+		.mtu = 131,
+		.rx_bytes = phone_rx_bytes,
+		.tx_bytes = phone_tx_bytes,
+	};
+}
+
+bool bluetooth_send(const void *data, size_t len)
+{
+	if (!phone_there) {
+		return false;
+	}
+	phone_tx_bytes += len;
+	LOG_INF("to the phone: %.*s", (int)len, (const char *)data);
+	return true;
+}
+
+/* sim phone on | off | <a line it sends, in hex> */
+static int cmd_phone(const struct shell *sh, size_t argc, char **argv)
+{
+	static uint8_t bytes[1500];
+	size_t len;
+
+	if (strcmp(argv[1], "on") == 0 || strcmp(argv[1], "off") == 0) {
+		phone_there = radio_on && argv[1][1] == 'n';
+		if (phone_there) {
+			phone_connected();
+		} else {
+			phone_disconnected();
+		}
+		ui_refresh();
+		return 0;
+	}
+	len = hex2bin(argv[1], strlen(argv[1]), bytes, sizeof(bytes) - 1);
+	if (len == 0 || !phone_there) {
+		shell_error(sh, "no phone, or not hex");
+		return -EINVAL;
+	}
+	bytes[len++] = '\n';
+	phone_rx_bytes += len;
+	phone_rx(bytes, len);
+	return 0;
+}
+
 SHELL_STATIC_SUBCMD_SET_CREATE(sim_cmds,
 	SHELL_CMD_ARG(battery, NULL, "<percent> <usb power 0|1> [charger state 0-6]", cmd_battery,
 		      3, 1),
 	SHELL_CMD_ARG(gps, NULL, "off | <latitude> <longitude> [altitude m]", cmd_gps, 2, 2),
 	SHELL_CMD_ARG(move, NULL, "<km/h> <heading> [climb m/min]: move from where gps put it",
 		      cmd_move, 3, 1),
+	SHELL_CMD_ARG(phone, NULL, "on | off | <a line the phone sends, in hex>", cmd_phone, 2, 0),
 	SHELL_CMD(state, NULL, "What the UI has asked of the hardware", cmd_state),
 	SHELL_SUBCMD_SET_END);
 SHELL_CMD_REGISTER(sim, &sim_cmds, "Simulated hardware", NULL);

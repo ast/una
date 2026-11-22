@@ -53,17 +53,19 @@ simulator, smpmgr for firmware upload, plus openocd, probe-rs, tio and clangd.
 
 - Five watch faces: a digital one and four analogue dials, white or black
   (below). Each shows the date, the battery and the alarm time.
-- One ring of pages, no menu: face, recorder, stopwatch, countdown timer, one
-  daily alarm, settings (backlight time, sound, vibration, power off) and
-  systems. Timer and alarm ring with the buzzer and the vibration motor.
+- One ring of pages, no menu: face, recorder, messages, stopwatch, countdown
+  timer, one daily alarm, settings (backlight time, sound, vibration,
+  Bluetooth, power off) and systems. Timer and alarm ring with the buzzer and the vibration motor.
 - One recorder for every activity: it keeps time, distance, pace and climb
   and writes a FIT file as it goes; whether it was a walk, run, ride or hike
-  is a label on the summary. The GPS receiver is driven and answers; that
-  it gets a fix and gives a sound track outdoors is still to be tried.
+  is a label on the summary. The GPS receiver gets its first fix in about a
+  minute outdoors; a whole track is still to be recorded.
+- Bluetooth to an Android phone through Gadgetbridge: the phone sets the
+  clock and its notifications are shown on the watch (below).
 - System pages in the manner of an aircraft's: an overview of the subsystems
   on the power lines, and a page each for the electrical system (currents,
   charge, an hour's trend), the MCU, storage, the GPS receiver (satellites
-  and their signal strengths) and alerts.
+  and their signal strengths), the radio and alerts.
 - Battery gauge and charger status (the percentage is worked out from the
   gauge's charge estimate: its own figure stays at 100 for the first tenth
   of a discharge, see `charge()` in `src/power.c`), power-off, Stop mode whenever idle and off
@@ -71,7 +73,7 @@ simulator, smpmgr for firmware upload, plus openocd, probe-rs, tio and clangd.
 - Clock from the RTC with a stored UTC offset, set from the computer.
 - Log files on the eMMC with a telemetry line a minute.
 - Firmware update over USB with automatic rollback; a simulator.
-- Not yet: Bluetooth (the radio chip is held in reset), sensors. The plan
+- Not yet: the sensors, pairing (see Phone). The plan
   is [docs/zephyr-plan.md](docs/zephyr-plan.md).
 
 The version is in `zephyr/una/app/VERSION` and shown on the MCU system page.
@@ -127,7 +129,9 @@ shell, settings, the clock, alarms and timers run as on the watch, with the
 screen in SDL. What is hardware on the watch (battery, buzzer, motor) is
 stood in for by `src/sim.c` and set or read with the `sim` shell command;
 the GPS receiver is Zephyr's emulated one and the user volume is the
-directory `build/sim/user`. Power, USB and Bluetooth are not in it.
+directory `build/sim/user`. The phone is stood in for too: `sim phone on`
+connects one and `sim phone <hex>` has it send a line. Power and USB are
+not in it.
 
 ```sh
 west build -b native_sim/native/64 -d build/sim zephyr/una/app   # once; then west build -d build/sim
@@ -164,6 +168,7 @@ DOWN from the face goes through the ring in this order, UP the other way:
 |---|---|---|
 | Face | go in: choose the face | the same |
 | Record | start, pause, resume | finish |
+| Messages | go in: the ones before the latest | |
 | Stopwatch | start, stop | reset |
 | Timer | start, stop | go in: set the minutes |
 | Alarm | on, off | go in: set hour, then minute |
@@ -213,6 +218,39 @@ seconds (fix, satellites used and heard, the six best signal strengths,
 time to the first fix), so that what happened outdoors can be read from
 `una-z logs` afterwards; `una-z sh gnss` shows the same now, and `una-z sh
 gnss on` turns it on from the shell.
+
+## Phone
+
+The watch talks to [Gadgetbridge](https://gadgetbridge.org) on Android, which
+takes it for a Bangle.js: a serial line (the Nordic UART service) with a
+line of text per message. The phone sets the clock when it connects, and
+what it is notified of is shown on the watch with a nudge: the app, the
+title, the text and when it came. The Messages page keeps the last eight;
+one dismissed on the phone goes from the watch as well. A call rings, and
+"find my device" does too. The watch tells the phone its version and
+battery.
+
+To add the watch in Gadgetbridge, once: in its settings turn on "Discover
+unsupported devices"; press +, and long-press "UNA Watch" in the list;
+choose "Add test device" and then Bangle.js. Leave "Text as bitmaps" off in
+the device's settings.
+
+The radio chip (BlueNRG-2N) runs the Bluetooth stack itself, as it does
+under the stock firmware; Zephyr's own stack is not used, as the chip's
+firmware does not pass data through as a plain controller would have to.
+`src/bluenrg.c` carries commands and events over SPI, `src/bluetooth.c`
+sets up the one service and keeps the chip advertising, once a second, and
+`src/phone.c` reads and writes the lines. Fifteen seconds into a connection
+the watch asks the phone for a slow pace (100 to 200 ms, four in five
+skipped), which is what the battery pays for all day. The watch goes by an
+address of its own, not the chip's, so that the stock firmware's phone app
+does not take it for its watch. Bluetooth is turned off in Settings, which
+holds the chip in reset; `una-z sh radio` shows the state, as does the BLE
+system page.
+
+Not done yet: pairing. Any phone in range can connect and send the watch a
+time or a message; nothing can be read from it but version and battery. The
+fonts have ASCII only, so a letter with an accent is shown without it.
 
 ## Watch faces
 

@@ -17,8 +17,11 @@
 #endif
 
 #include "alert.h"
+#include "bluetooth.h"
+#include "clock.h"
 #include "draw.h"
 #include "gnss.h"
+#include "phone.h"
 #include "power.h"
 #include "storage.h"
 #include "ui.h"
@@ -33,6 +36,7 @@ static lv_obj_t *canvas;
 static struct power_status st;
 static struct power_stats stats;
 static struct gnss_status gnss;
+static struct bluetooth_status ble;
 
 /* PCA9420 charger states. */
 static const char *charger_name(void)
@@ -167,13 +171,25 @@ static void paint_overview(void)
 	} else {
 		block(x3[0], y3, "GNSS", "ACQ", DRAW_AMBER);
 	}
-	/* Not built yet: their supplies are off. */
-	block(x3[1], y3, "BLE", "RST", DRAW_GREY);
+	/* The radio: with a phone, looking for one, or held in reset. */
+	if (ble.state == BLUETOOTH_CONNECTED) {
+		block(x3[1], y3, "BLE", ble.listening ? "LINK" : "CONN", DRAW_GREEN);
+	} else if (ble.state == BLUETOOTH_FAILED) {
+		block(x3[1], y3, "BLE", "FAIL", DRAW_AMBER);
+	} else if (ble.state == BLUETOOTH_OFF) {
+		block(x3[1], y3, "BLE", "RST", DRAW_GREY);
+	} else {
+		block(x3[1], y3, "BLE", "ADV", DRAW_GREEN);
+	}
+	/* Not built yet: their supply is off. */
 	block(x3[2], y3, "SENS", "OFF", DRAW_GREY);
 	block(x3[3], y3, "ALRT", sound ? "ON" : "MUTE", sound ? DRAW_GREEN : DRAW_GREY);
 	for (int i = 0; i < ARRAY_SIZE(x3); i++) {
 		draw_line(x3[i], sub, x3[i], y3 - BLOCK_H / 2, 1,
-			  (i == 0 && gnss.on) || (i == 3 && sound) ? DRAW_GREEN : DRAW_GREY);
+			  (i == 0 && gnss.on) || (i == 1 && ble.state != BLUETOOTH_OFF) ||
+					  (i == 3 && sound)
+				  ? DRAW_GREEN
+				  : DRAW_GREY);
 	}
 }
 
@@ -187,6 +203,7 @@ static uint32_t systems_update(void)
 	power_last(&st);
 	power_stats(&stats);
 	gnss_status(&gnss);
+	bluetooth_status(&ble);
 	lv_obj_invalidate(canvas);
 	/* A receiver that is on has news every second. */
 	return gnss.on ? 1000 : 5000;
@@ -199,6 +216,7 @@ enum page {
 	PAGE_MCU,
 	PAGE_STOR,
 	PAGE_GNSS,
+	PAGE_BLE,
 	PAGE_ALRT,
 	PAGE_COUNT,
 };
@@ -411,6 +429,51 @@ static void paint_gnss(void)
 		  DRAW_DIM, DRAW_CENTRE);
 }
 
+static void paint_ble(void)
+{
+	static const char *const states[] = {"RESET", "START", "ADVERT", "CONN", "FAIL"};
+	static const uint32_t colours[] = {DRAW_GREY, DRAW_WHITE, DRAW_GREEN, DRAW_GREEN,
+					   DRAW_AMBER};
+	struct phone_status phone;
+	char text[20];
+
+	phone_status(&phone);
+	title("BLE");
+	line(0, "RADIO", states[ble.state], "", colours[ble.state]);
+	if (ble.state != BLUETOOTH_CONNECTED) {
+		line(1, "PHONE", "---", "", DRAW_GREY);
+	} else {
+		/* Connected is not yet talking: Gadgetbridge has to open the line. */
+		line(1, "PHONE", ble.listening ? "LINK" : "NO LINK", "",
+		     ble.listening ? DRAW_GREEN : DRAW_AMBER);
+		snprintf(text, sizeof(text), "%u", ble.interval_ms);
+		line(2, "PACE", text, "ms", DRAW_GREEN);
+		snprintf(text, sizeof(text), "%u", ble.latency);
+		figure(52, -62 + 2 * 21, "", text, "skip", DRAW_GREEN);
+		if (ble.connected_s >= 3600) {
+			snprintf(text, sizeof(text), "%uh %02um", ble.connected_s / 3600,
+				 ble.connected_s / 60 % 60);
+		} else {
+			snprintf(text, sizeof(text), "%um %02us", ble.connected_s / 60,
+				 ble.connected_s % 60);
+		}
+		line(3, "FOR", text, "", DRAW_GREEN);
+	}
+	snprintf(text, sizeof(text), "%u / %u", ble.rx_bytes, ble.tx_bytes);
+	line(4, "RX/TX", text, "B", DRAW_WHITE);
+	snprintf(text, sizeof(text), "%u", phone.lines);
+	line(5, "LINES", text, "", DRAW_WHITE);
+	if (phone.time_set_at != 0) {
+		time_t ago = clock_utc() - phone.time_set_at;
+
+		snprintf(text, sizeof(text), "%d", (int)(ago / 60));
+		line(6, "TIME", text, "min ago", DRAW_GREEN);
+	} else {
+		line(6, "TIME", "---", "", DRAW_GREY);
+	}
+	draw_text(0, 92, ble.own, SMALL, DRAW_DIM, DRAW_CENTRE);
+}
+
 static void paint_alrt(void)
 {
 	title("ALRT");
@@ -423,7 +486,7 @@ static void paint_alrt(void)
 static void paint_page(void)
 {
 	static void (*const paint[PAGE_COUNT])(void) = {paint_elec, paint_mcu, paint_stor,
-							paint_gnss, paint_alrt};
+							paint_gnss, paint_ble,  paint_alrt};
 
 	paint[page]();
 }

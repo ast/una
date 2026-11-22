@@ -16,4 +16,7 @@ time_t clock_utc(void);
 /* Seconds east of UTC. */
 int clock_utc_offset(void);
 
+/* Set the RTC, and the offset in minutes east of UTC, which is stored. */
+int clock_set(time_t utc, int offset_min);
+
 #endif

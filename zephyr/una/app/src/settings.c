@@ -8,6 +8,7 @@
 #include <zephyr/kernel.h>
 
 #include "alert.h"
+#include "bluetooth.h"
 #include "power.h"
 #include "ui.h"
 
@@ -15,6 +16,7 @@ enum {
 	ROW_BACKLIGHT,
 	ROW_SOUND,
 	ROW_VIBRATION,
+	ROW_BLUETOOTH,
 	ROW_POWER_OFF,
 	ROW_COUNT,
 };
@@ -36,6 +38,8 @@ static const char *row_text(int index)
 		return alert_sound() ? "Sound on" : "Sound off";
 	case ROW_VIBRATION:
 		return alert_vibration() ? "Vibration on" : "Vibration off";
+	case ROW_BLUETOOTH:
+		return bluetooth_is_set() ? "Bluetooth on" : "Bluetooth off";
 	default:
 		/* Asked for by holding, in place of a question afterwards. */
 		return "Hold: power off";
@@ -101,6 +105,9 @@ static bool settings_key(enum ui_key key, bool held)
 	case ROW_VIBRATION:
 		alert_set_vibration(!alert_vibration());
 		alert_blip();
+		break;
+	case ROW_BLUETOOTH:
+		bluetooth_set(!bluetooth_is_set());
 		break;
 	}
 	return true;

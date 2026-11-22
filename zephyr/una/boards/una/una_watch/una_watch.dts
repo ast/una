@@ -289,7 +289,6 @@ zephyr_udc0: &usbotg_hs {
 		spi-hold-cs;
 		spi-max-frequency = <DT_FREQ_M(1)>;
 		reset-event;
-		req-ll-only;
 		reset-assert-duration-ms = <6>;
 	};
 };

@@ -23,6 +23,7 @@
 #include <zephyr/shell/shell.h>
 #include <zephyr/sys/byteorder.h>
 
+#include "phone.h"
 #include "power.h"
 
 LOG_MODULE_REGISTER(power, LOG_LEVEL_INF);
@@ -282,6 +283,7 @@ static void telemetry(const struct power_status *st, int32_t mean_ua)
 		last_idle = cpu.idle_cycles;
 	}
 	(void)rtc_get_time(rtc, &t);
+	phone_battery(st->percent, st->usb_power && st->microamps > 0, st->millivolts);
 
 	/*
 	 * soc is the percentage shown, cap the charge it is made from; rep is
