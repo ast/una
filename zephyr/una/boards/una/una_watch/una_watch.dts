@@ -327,7 +327,8 @@ zephyr_udc0: &usbotg_hs {
 
 /*
  * BLE module (UNAlink_BLUENRG2). The BlueNRG-234N boots with ST's own host
- * stack; req-ll-only tells it to act as a plain controller for this session.
+ * stack; req-ll-only tells it to act as a plain controller for this session,
+ * which carries data from ST's firmware 3.4.0 on.
  */
 &spi1 {
 	pinctrl-0 = <&spi1_sck_pg2 &spi1_miso_pg3 &spi1_mosi_pb5>;
@@ -344,6 +345,7 @@ zephyr_udc0: &usbotg_hs {
 		spi-hold-cs;
 		spi-max-frequency = <DT_FREQ_M(1)>;
 		reset-event;
+		req-ll-only;
 		reset-assert-duration-ms = <6>;
 	};
 };

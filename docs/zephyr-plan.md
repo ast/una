@@ -194,14 +194,30 @@ notifications, calls and find, version and battery. Next: pairing (the chip
 keeps the bonds; passkey shown on the watch), a font with more than ASCII,
 music control and weather, what the connection costs in current.
 
-Open: on 22 Nov, after a link lost out of range and made again by the phone
-four minutes later, the opening went as usual (clock set) and then nothing
-arrived for 95 minutes, though the phone had notifications and both sides
-showed the connection. Bluetooth off and on at the watch mended it. Nothing
-in the log told which side had stopped, so the line logged every minute now
-carries the radio's state, bytes and lines either way and the signal
-strength the chip reports (asked once a minute: a chip that answers has a
-link), failed sends are logged, and so are lines not understood.
+Bluetooth again, 22 Nov: Zephyr's host after all. ST's firmware 3.4.0 for
+the chip (stack 2.1f, package STSW-BNRG2N) passes data in controller-only
+mode, where the factory's 3.2.0 does not. The watch loads it into the chip
+itself, over SPI through the chip's updater (`bnrg-update.conf`,
+`src/bnrg_update.c`; the README has the steps), and `req-ll-only` is back in
+the devicetree. `src/bluetooth.c` is now a user of Zephyr's stack: its
+Nordic UART service, the same address, name, advertising and slow pace as
+before, and the same interface to the rest of the watch. `src/bluenrg.c`
+stays as the updater's way to the chip. What it took besides: a malloc arena
+for the host's cryptography (PSA), random numbers from the chip
+(`BT_HOST_CRYPTO_PRNG=n`), no flow control from controller to host, as many
+ACL buffers as the chip has (7). With it the original phase 5 is open again:
+pairing with bonds in settings (it will want the SoC's random number
+generator), standard services, mcumgr over Bluetooth.
+
+Seen with it: at every connection the log has "opcode 0x2016 status 0x3a",
+the chip being busy when the host asks for the phone's features; nothing
+follows from it. And the link was lost once with reason 0x08 some 40 s
+after the slow pace took effect, at -39 dBm, as it was under the chip's own
+stack (about 25 times in 40 minutes on the same day): so that is the pace,
+or the phone, and not the stack. Latency 4 with a 6 s timeout may be too
+tight; not looked into yet. The link that stayed up and carried nothing,
+seen several times under the chip's stack, has not been seen yet; the probe
+for it went with the old code.
 
 Barometer (v0.5.0): the MS5837-02BA is driven by the app (`src/baro.c`,
 `src/baro_hw.c`), not by Zephyr's driver, which reads the calibration at
@@ -257,10 +273,6 @@ the earth's field going down and most of the rest must be the watch's own.
 Not checked: the calibration, and the heading against a compass, which need
 the watch turned by hand. Not done: true north, a fit better than least and
 most (the stock firmware fits an ellipsoid), the current it costs.
-
-A newer chip firmware from ST would pass data in controller-only mode and
-can be loaded over SPI. It is not done: it would change the chip under the
-stock firmware too.
 
 - Daily health service: steps, floors, active minutes, average and resting
   HR, per-minute HR, stored per day on the eMMC in the stock JSON layout.

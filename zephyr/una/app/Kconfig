@@ -1,0 +1,17 @@
+config UNA_BNRG_UPDATE
+	bool "Load the radio chip's firmware instead of running the radio"
+	depends on BOARD_UNA_WATCH
+	help
+	  Builds the watch without Bluetooth and with ST's firmware image for
+	  the BlueNRG-2N inside, which the shell command "bnrg update" writes
+	  into the chip. See bnrg-update.conf.
+
+config UNA_BNRG_FW
+	string "ST's firmware image for the radio chip"
+	depends on UNA_BNRG_UPDATE
+	default "../../../firmware/ble/BlueNRG_2N_FW_V3_4_0.bin"
+	help
+	  BlueNRG_2N_FW_V3_4_0.bin from fw_images/ in ST's STSW-BNRG2N, by its
+	  path from the application's folder or in full.
+
+source "Kconfig.zephyr"

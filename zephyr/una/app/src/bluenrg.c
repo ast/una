@@ -41,9 +41,12 @@ static const struct gpio_dt_spec reset = GPIO_DT_SPEC_GET(NODE, reset_gpios);
 #define EVENT_COMMAND_COMPLETE 0x0e
 #define EVENT_COMMAND_STATUS   0x0f
 #define VENDOR_INITIALIZED     0x0001
+/* Its buffers are full for now: the caller tries again. */
+#define STATUS_NO_BUFFERS      0x64
 
 #define RESET_MS   10
-#define START_MS   2000
+/* Firmware 3.4.0 checks its own image before it starts: about two seconds. */
+#define START_MS   5000
 #define ANSWER_MS  2000
 #define PACKET_MAX 520
 
@@ -56,6 +59,7 @@ K_MSGQ_DEFINE(bluenrg_events, sizeof(struct bluenrg_event), 6, 4);
 
 static struct gpio_callback irq_callback;
 static bool running, starting;
+static uint8_t start_reason;
 
 /* The command being waited for, and its answer. */
 static struct k_spinlock pending_lock;
@@ -229,6 +233,7 @@ static void queue_event(const uint8_t *packet, size_t len)
 		if (ev.code == VENDOR_INITIALIZED && starting) {
 			/* As asked for: bluenrg_start() waits for this one. */
 			starting = false;
+			start_reason = body_len >= 1 ? body[0] : 0;
 			k_sem_give(&started);
 			return;
 		}
@@ -302,8 +307,9 @@ int bluenrg_cmd(uint16_t opcode, const void *params, size_t len, void *rsp, size
 			}
 		}
 	}
-	if (ret != 0) {
-		LOG_DBG("command 0x%04x: %d", opcode, ret);
+	if (ret != 0 && ret != STATUS_NO_BUFFERS) {
+		LOG_WRN("command 0x%04x: %s 0x%02x", opcode, ret < 0 ? "error" : "status",
+			ret < 0 ? -ret : ret);
 	}
 	k_mutex_unlock(&cmd_lock);
 	return ret;
@@ -351,6 +357,11 @@ int bluenrg_start(void)
 		return -ETIMEDOUT;
 	}
 	return 0;
+}
+
+uint8_t bluenrg_start_reason(void)
+{
+	return start_reason;
 }
 
 void bluenrg_stop(void)

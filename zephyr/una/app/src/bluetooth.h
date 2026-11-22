@@ -32,6 +32,7 @@ struct bluetooth_status {
 	uint16_t mtu;
 	uint32_t connected_s; /* for how long */
 	uint32_t connects;    /* since boot */
+	uint32_t resets;      /* times the radio was started over, since boot */
 	uint32_t rx_bytes;
 	uint32_t tx_bytes;
 	int8_t rssi;          /* dBm as the chip last heard the phone; 0 when not known */

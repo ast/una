@@ -96,7 +96,7 @@ each of them.
 | Buzzer | works | timer, alarm, calls | |
 | Vibration motor, DRV2625 | works | nudges and ringing, open loop (`src/alert_hw.c`) | its calibrated closed-loop mode |
 | GPS, Airoha AG3335M | works | own driver (`zephyr/una/drivers/gnss`): fix in about a minute, position, speed, satellites | assisted start (EPO), a whole track checked outdoors, the count of satellites heard is too low |
-| Bluetooth, ST BlueNRG-2N | works | the chip's own stack over SPI (`src/bluenrg.c`): one serial service, Gadgetbridge | pairing; see Phone |
+| Bluetooth, ST BlueNRG-2N | works | Zephyr's stack, the chip as a plain controller (needs ST's firmware 3.4.0 in it): one serial service, Gadgetbridge | pairing; see Phone |
 | USB-C controller, STUSB4500 | not driven | charges at its defaults | reading what the cable offers |
 | Barometer, MS5837-02BA | works | on while recording, read once a second (`src/baro_hw.c`): climb, and altitude in the file | floors; what it costs in current is not measured |
 | Accelerometer and gyro, BMI270 | works, not yet tried on a wrist | own driver (`zephyr/una/drivers/sensor/bmi270`, made of Zephyr's): the chip's step counter and activity, read once a minute; a turn of the wrist lights the screen (`src/motion_hw.c`) | steps and wrist turn checked on a wrist; steps kept over a restart, shown on a page and stored per day; cadence; what it costs in current |
@@ -290,18 +290,87 @@ unsupported devices"; press +, and long-press "UNA Watch" in the list;
 choose "Add test device" and then Bangle.js. Leave "Text as bitmaps" off in
 the device's settings.
 
-The radio chip (BlueNRG-2N) runs the Bluetooth stack itself, as it does
-under the stock firmware; Zephyr's own stack is not used, as the chip's
-firmware does not pass data through as a plain controller would have to.
-`src/bluenrg.c` carries commands and events over SPI, `src/bluetooth.c`
-sets up the one service and keeps the chip advertising, once a second, and
-`src/phone.c` reads and writes the lines. Fifteen seconds into a connection
-the watch asks the phone for a slow pace (100 to 200 ms, four in five
-skipped), which is what the battery pays for all day. The watch goes by an
-address of its own, not the chip's, so that the stock firmware's phone app
-does not take it for its watch. Bluetooth is turned off in Settings, which
-holds the chip in reset; `una-z sh radio` shows the state, as does the BLE
-system page.
+Bluetooth is Zephyr's own stack on the SoC, with the radio chip
+(BlueNRG-2N) as a plain controller over SPI (`st,hci-spi-v2` with
+`req-ll-only` in the board's devicetree). The chip does that properly only
+from ST's firmware 3.4.0 on, which has to be loaded into it once: see the
+next section. `src/bluetooth.c` starts the stack, keeps the watch
+advertising, once a second, and offers the one service (Zephyr's
+`CONFIG_BT_ZEPHYR_NUS`); `src/phone.c` reads and writes the lines. Fifteen
+seconds into a connection the watch asks the phone for a slow pace (100 to
+200 ms, four in five skipped), which is what the battery pays for all day.
+The watch goes by an address of its own, not the chip's, so that the stock
+firmware's phone app does not take it for its watch. Bluetooth is turned off
+in Settings, which holds the chip in reset; `una-z sh radio` shows the
+state, as does the BLE system page, and `una-z sh radio restart` starts the
+radio over. The log says what the stack does, and at start which firmware
+the chip has.
+
+### The radio chip's firmware
+
+The chip comes with ST's firmware 3.2.0 (stack 2.1c), which connects as a
+plain controller but passes no data. ST's 3.4.0 (stack 2.1f) does. It is in
+the package STSW-BNRG2N, free of charge from ST after signing in:
+<https://www.st.com/en/embedded-software/stsw-bnrg2n-v320.html> (choose
+version 3.4.0; the page's name still says v320). ST's licence does not let
+the image be passed on by itself, so it is not in this repository.
+
+The chip's debug port is only on test points of the Bluetooth module, so the
+watch loads the image itself, over SPI, through the updater the chip carries
+in its first 8 KB of flash. That is a build of this firmware without
+Bluetooth and with the image inside (`bnrg-update.conf`,
+`src/bnrg_update.c`):
+
+```sh
+# 1. ST's image, to where the build looks for it
+mkdir -p firmware/ble
+unzip -j en.stsw-bnrg2n-v340.zip '*/fw_images/BlueNRG_2N_FW_V3_4_0.bin' -d firmware/ble
+sha256sum firmware/ble/BlueNRG_2N_FW_V3_4_0.bin
+# 119e982c37f24eadd9982a26752cee0f7908628cb0f124c23e8d656541d1bc26
+
+# 2. the watch as the tool that loads it
+west build -b una_watch --sysbuild -d build/bnrg zephyr/una/app -- -DEXTRA_CONF_FILE=bnrg-update.conf
+una-z flash build/bnrg/app/zephyr/zephyr.signed.bin
+
+# 3. what the chip has now
+una-z sh -t 20 bnrg info
+# firmware 3.2.0 (SPI), stack 2.1c, variant 0x000f
+# in the updater, version 6 (started as 2)
+# board settings: ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+
+# 4. optional: a copy of the chip's flash as it was (everything after the updater)
+una-z sh -t 900 bnrg read 10042000 3e000 > chip-flash.txt
+
+# 5. load it: half a minute
+una-z sh -t 300 bnrg update
+# writing 137672 bytes ... checking
+# firmware 3.4.0 (SPI), stack 2.1f, variant 0x000f
+
+# 6. the watch's own firmware again
+west build -d build/zephyr && una-z flash
+```
+
+`bnrg update` asks the chip to restart as its updater, erases the flag that
+marks the chip's image as whole, erases and writes the image sector by
+sector (2 KB, in blocks of 64 bytes, from 0x10042000), has the chip sum
+every sector and compares, and sets the flag again only when all sums are
+right. Then it restarts the chip and prints the version it reports. A run
+that is cut short leaves the chip without the flag, and so in its updater at
+every start: run `bnrg update` again. It does nothing when the chip already
+has 3.4.0 (`bnrg update again` writes it anyway), and wants the battery at
+30 % or USB power. It is the procedure of ST's own updater for a host
+processor (X-CUBE-BLE2, `IFRStack_Updater`).
+
+The board's settings in the chip (crystal, low-speed clock, power supply)
+are in the last sector of its flash, which is read and printed and never
+written. On the watch they are blank, before and after: the chip goes by the
+firmware's defaults. The lines of `bnrg read` are an address and 32 bytes in
+hex; written back in the same way they would restore the old image, though
+nothing here does that yet.
+
+The stock firmware finds stack 2.1f in the chip afterwards. The watch's
+earlier firmware for the chip's own stack (`src/bluenrg.c` with ST's ACI
+commands, as it was before) was seen to work on 3.4.0 too.
 
 Not done yet: pairing. Any phone in range can connect and send the watch a
 time or a message; nothing can be read from it but version and battery. Text

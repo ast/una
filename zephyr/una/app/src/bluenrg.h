@@ -15,6 +15,11 @@
 
 /* Out of reset, and wait until it says it has started. 0 or -errno. */
 int bluenrg_start(void);
+/*
+ * What it said it started as: 1 is the stack, 2 to 4 its updater (asked for,
+ * by pin, or because there is no whole stack image), above that after a fault.
+ */
+uint8_t bluenrg_start_reason(void);
 /* Into reset, where it stays and draws nothing. */
 void bluenrg_stop(void);
 

@@ -37,8 +37,6 @@ if(CONFIG_BOARD_UNA_WATCH)
   target_sources(app PRIVATE
     src/alert_hw.c
     src/baro_hw.c
-    src/bluenrg.c
-    src/bluetooth.c
     src/compass_hw.c
     src/motion_hw.c
     src/power.c
@@ -46,6 +44,19 @@ if(CONFIG_BOARD_UNA_WATCH)
     src/usb.c
     src/watchdog.c
   )
+  # The radio, or in its place what loads the radio chip's firmware
+  # (-DEXTRA_CONF_FILE=bnrg-update.conf).
+  if(CONFIG_UNA_BNRG_UPDATE)
+    get_filename_component(bnrg_fw ${CONFIG_UNA_BNRG_FW} ABSOLUTE BASE_DIR ${CMAKE_SOURCE_DIR})
+    if(NOT EXISTS ${bnrg_fw})
+      message(FATAL_ERROR "CONFIG_UNA_BNRG_FW: there is no ${bnrg_fw}")
+    endif()
+    generate_inc_file_for_target(app ${bnrg_fw}
+      ${ZEPHYR_BINARY_DIR}/include/generated/bnrg_fw.inc)
+    target_sources(app PRIVATE src/bluenrg.c src/bnrg_update.c)
+  else()
+    target_sources(app PRIVATE src/bluetooth.c)
+  endif()
 else()
   target_sources(app PRIVATE src/sim.c)
 endif()
