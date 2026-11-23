@@ -12,10 +12,14 @@
  *   gives the spectrum is taken out of it again.
  * - The sensor changes its LED when it likes, which is a step in the light
  *   in spite of the scaling. The difference across a change is left out.
- * - A wrist that moves shakes the sensor on the skin, at the pace of the
- *   steps and of the arm, as strongly as the pulse or more. The
- *   accelerometer shows that pace, and what the light has at the same
- *   frequencies is turned down by as much as the movement has there.
+ * - A hand that reaches, types or turns shifts the sensor on the skin, and
+ *   the light jumps by far more than a beat moves it. The accelerometer
+ *   shows the jolt, and the light of that moment is left out. More than
+ *   half of the window so, and there is no answer.
+ * - Walking and running are all jolts, but have a pace, which the
+ *   accelerometer shows: then nothing is left out, and what the light has
+ *   at the movement's frequencies is turned down by as much as the movement
+ *   has there. Written, and not yet tried on anyone walking.
  * - Between two seconds the pulse does not go far. A peak near the last
  *   answer counts for more than one far off, and an answer is only given
  *   when the peak stands clear, some seconds running.
@@ -48,6 +52,9 @@
  * square in mg, and the wrist counts as moving.
  */
 #define MOVING_MG2    (30 * 30)
+/* A change of the three axes between two samples that is a jolt, in mg. */
+#define JOLT_MG       60
+#define JOLT_MG2      (JOLT_MG * JOLT_MG)
 /* And its strongest frequency stands so many times above their average. */
 #define PACED         6
 
@@ -144,6 +151,19 @@ static const struct hr_alg_sample *at(unsigned int i)
 	return &ring[(head + N - fill + i) & (N - 1)];
 }
 
+/* How far the acceleration went from one sample to the next, squared, in mg. */
+static int32_t jolt(const struct hr_alg_sample *a, const struct hr_alg_sample *b)
+{
+	int32_t sum = 0;
+
+	for (int axis = 0; axis < 3; axis++) {
+		int32_t d = b->accel_mg[axis] - a->accel_mg[axis];
+
+		sum += d * d;
+	}
+	return sum;
+}
+
 /*
  * The spectrum of what is in re[0..fill): scaled to 14 bits, under a window
  * that falls to nothing at both ends, the rest of the 256 left at zero.
@@ -176,8 +196,13 @@ static void spectrum(uint64_t *power, bool tilted)
 	for (unsigned int k = 0; k <= BIN_HI + 1; k++) {
 		power[k] = (uint64_t)((int64_t)re[k] * re[k] + (int64_t)im[k] * im[k]);
 		if (tilted && k > 0) {
-			/* A difference grows with the frequency; its power by the square. */
-			power[k] = power[k] * 64 / (k * k);
+			/*
+			 * A difference grows with the frequency, its power by
+			 * the square. Half of that is taken out again: all of
+			 * it, and what a restless hand does to the light, which
+			 * is slow, stands above the pulse.
+			 */
+			power[k] = power[k] * 8 / k;
 		}
 	}
 }
@@ -186,31 +211,9 @@ static bool analyse(struct hr_alg_out *out)
 {
 	uint64_t accel_peak = 0, accel_sum = 0, total = 0, best_score = 0, near;
 	int64_t accel_ms = 0;
-	unsigned int best = 0;
+	unsigned int best = 0, blanked = 0;
 	int delta_q8 = 0;
 	bool moving;
-
-	/* The light: differences, none across a change of the LED. */
-	re[0] = 0;
-	for (unsigned int i = 1; i < fill; i++) {
-		const struct hr_alg_sample *a = at(i - 1), *b = at(i);
-
-		re[i] = a->led == b->led ? (int32_t)(b->light - a->light) : 0;
-	}
-	/* A knock on the watch is a spike many times the pulse: held to size. */
-	{
-		int64_t sum = 0;
-		int32_t limit;
-
-		for (unsigned int i = 0; i < fill; i++) {
-			sum += re[i] < 0 ? -re[i] : re[i];
-		}
-		limit = (int32_t)(sum / fill) * 4 + 1;
-		for (unsigned int i = 0; i < fill; i++) {
-			re[i] = re[i] > limit ? limit : re[i] < -limit ? -limit : re[i];
-		}
-	}
-	spectrum(light_power, true);
 
 	/*
 	 * The movement: differences here too, so that a wrist turned over, which
@@ -243,6 +246,41 @@ static bool analyse(struct hr_alg_out *out)
 	moving = accel_ms / fill > MOVING_MG2 &&
 		 accel_peak > accel_sum / (BIN_HI - BIN_LO + 3) * PACED;
 	out->moving = moving;
+	/* The light: differences, none across a change of the LED. */
+	re[0] = 0;
+	for (unsigned int i = 1; i < fill; i++) {
+		const struct hr_alg_sample *a = at(i - 1), *b = at(i);
+
+		re[i] = a->led == b->led ? (int32_t)(b->light - a->light) : 0;
+		/*
+		 * Nor while the watch is jolted: the sensor shifts on the skin
+		 * and the light with it, by far more than a beat changes it.
+		 * A paced movement is all jolts, and is dealt with below.
+		 */
+		if (!moving && jolt(a, b) > JOLT_MG2) {
+			re[i] = 0;
+			blanked++;
+		}
+	}
+	if (blanked > fill / 2) {
+		out->quality = 0;
+		return false;
+	}
+	/* A knock on the watch is a spike many times the pulse: held to size. */
+	{
+		int64_t sum = 0;
+		int32_t limit;
+
+		for (unsigned int i = 0; i < fill; i++) {
+			sum += re[i] < 0 ? -re[i] : re[i];
+		}
+		limit = (int32_t)(sum / fill) * 4 + 1;
+		for (unsigned int i = 0; i < fill; i++) {
+			re[i] = re[i] > limit ? limit : re[i] < -limit ? -limit : re[i];
+		}
+	}
+	spectrum(light_power, true);
+
 	if (moving) {
 		for (unsigned int k = BIN_LO - 1; k <= BIN_HI + 1; k++) {
 			/* Down by as much as the movement has here, to a tenth at its peak. */
