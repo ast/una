@@ -124,6 +124,14 @@
 		haptic-enable-gpios = <&gpiof 2 GPIO_ACTIVE_HIGH>;
 		/* ALTIMETER_EN: the barometer's supply. */
 		baro-en-gpios = <&gpiog 0 GPIO_ACTIVE_HIGH>;
+		/*
+		 * The heart-rate sensor: PPG_EN is its 1.8 V, VLED_EN the 4 V
+		 * of its LEDs, and its interrupt line rises. Only the build
+		 * with PixArt's library (hr-ref.conf) drives them so far.
+		 */
+		ppg-en-gpios = <&gpiof 13 GPIO_ACTIVE_HIGH>;
+		ppg-led-en-gpios = <&gpiog 10 GPIO_ACTIVE_HIGH>;
+		ppg-int-gpios = <&gpiof 12 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
 	};
 
 	leds {

@@ -14,4 +14,22 @@ config UNA_BNRG_FW
 	  BlueNRG_2N_FW_V3_4_0.bin from fw_images/ in ST's STSW-BNRG2N, by its
 	  path from the application's folder or in full.
 
+config UNA_PIXART_REF
+	bool "PixArt's closed library on the heart-rate sensor, with the bus traced"
+	depends on BOARD_UNA_WATCH && FPU && FP_HARDABI
+	help
+	  For working out the PAH8316's registers and for a pulse to hold our
+	  own against: the shell command "hrref" runs PixArt's driver and
+	  algorithm and writes what they do to /USER:/Log/PPG/. The library is
+	  PixArt's and not ours to pass on; it is linked from where
+	  UNA_PIXART_DIR says and never copied. See hr-ref.conf.
+
+config UNA_PIXART_DIR
+	string "The stock kernel's VendorLib folder"
+	depends on UNA_PIXART_REF
+	default "../../../refs/una-kernel-public/Software/ThirdParty/VendorLib"
+	help
+	  The folder with lib/libuna_vendor.a and include/pixart/, by its path
+	  from the application's folder or in full.
+
 source "Kconfig.zephyr"

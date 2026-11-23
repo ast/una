@@ -15,6 +15,8 @@
                              line a minute) to DIR (default: logs/)
   una-z runs [DIR]           copy the recorded activities (FIT files) to DIR
                              (default: runs/)
+  una-z ppg [DIR]            copy what was written of the heart-rate sensor
+                             (/Log/PPG on the eMMC) to DIR (default: logs/ppg/)
   una-z time                 set the watch's clock and UTC offset from this computer
   una-z wait                 wait until the shell answers
   una-z reset                reboot through mcumgr (works when the shell is stuck)
@@ -209,6 +211,7 @@ def flash(path):
 
 LOG_DIR = "/USER:/Log/Zephyr"
 ACTIVITY_DIR = "/USER:/Activity"
+PPG_DIR = "/USER:/Log/PPG"
 
 
 def logs(dest):
@@ -218,6 +221,17 @@ def logs(dest):
     for name in sorted(names):
         smpmgr("file", "download", f"{LOG_DIR}/{name}", os.path.join(dest, name))
         print(os.path.join(dest, name), os.path.getsize(os.path.join(dest, name)), "bytes")
+
+
+def ppg(dest):
+    os.makedirs(dest, exist_ok=True)
+    names = [l.split()[-1] for l in shell(f"fs ls {PPG_DIR}").split("\n") if l.split()[-1:] and
+             l.split()[-1].endswith(".txt")]
+    for name in sorted(names):
+        out = os.path.join(dest, name)
+        if not os.path.exists(out):
+            smpmgr("file", "download", f"{PPG_DIR}/{name}", out)
+        print(out, os.path.getsize(out), "bytes")
 
 
 def runs(dest):
@@ -338,6 +352,8 @@ def main():
             smpmgr("os", "reset")
         elif cmd == "runs":
             runs(rest[0] if rest else os.path.join(ROOT, "runs"))
+        elif cmd == "ppg":
+            ppg(rest[0] if rest else os.path.join(ROOT, "logs/ppg"))
         elif cmd == "logs":
             logs(rest[0] if rest else os.path.join(ROOT, "logs"))
         elif cmd == "time":
