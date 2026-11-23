@@ -1,0 +1,26 @@
+# Copyright (c) 2026 Albin Stigo
+# SPDX-License-Identifier: Apache-2.0
+
+config UNA_PAH8316
+	bool "PAH8316 heart-rate sensor"
+	default y
+	depends on DT_HAS_PIXART_PAH8316_ENABLED
+	select I2C
+	help
+	  PixArt's PAH8316LS optical heart-rate sensor on I2C: the green
+	  channels at 20 Hz in batches of a second, and whether there is skin
+	  under it. Without supply until a sampling frequency is set. The part
+	  has no public datasheet; the driver is written from what PixArt's
+	  own library was seen to do on the bus.
+
+if UNA_PAH8316
+
+config UNA_PAH8316_THREAD_PRIORITY
+	int "Priority of the thread that reads the sensor"
+	default 8
+
+config UNA_PAH8316_THREAD_STACK_SIZE
+	int "Stack of the thread that reads the sensor"
+	default 1536
+
+endif

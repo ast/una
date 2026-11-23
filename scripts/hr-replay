@@ -1,0 +1,19 @@
+#!/bin/sh
+# The watch's pulse algorithm over what was recorded of the heart-rate sensor
+# (the files "una-z ppg" fetches to logs/ppg/), on this computer.
+#
+#   hr-replay FILE...        a line for each file: how often there was a pulse,
+#                            and how far from the library's where the file has it
+#   hr-replay -v FILE        every second: time, the pulse, that second's own
+#                            answer, its quality, moving or still, the library's
+set -e
+root=$(dirname "$(dirname "$(realpath "$0")")")
+app=$root/zephyr/una/app/src
+mkdir -p "$root/build"
+cc -O2 -Wall -I"$app" -o "$root/build/hr-replay" "$root/scripts/hr-replay.c" "$app/hr_alg.c"
+if [ "$1" = -v ]; then
+	exec "$root/build/hr-replay" "$2" verbose
+fi
+for file; do
+	"$root/build/hr-replay" "$file"
+done

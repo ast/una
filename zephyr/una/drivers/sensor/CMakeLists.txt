@@ -1,2 +1,3 @@
 add_subdirectory_ifdef(CONFIG_UNA_BMI270 bmi270)
 add_subdirectory_ifdef(CONFIG_UNA_BMM350 bmm350)
+add_subdirectory_ifdef(CONFIG_UNA_PAH8316 pah8316)

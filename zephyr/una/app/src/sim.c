@@ -4,6 +4,7 @@
  */
 
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -16,6 +17,7 @@
 #include "baro.h"
 #include "bluetooth.h"
 #include "compass.h"
+#include "hr.h"
 #include "motion.h"
 #include "pairing.h"
 #include "phone.h"
@@ -175,6 +177,61 @@ int baro_hw_sample(int32_t *pressure_pa, int32_t *temperature_cc)
 static int cmd_baro(const struct shell *sh, size_t argc, char **argv)
 {
 	baro_there = strcmp(argv[1], "on") == 0;
+	return 0;
+}
+
+/*
+ * The heart-rate sensor: skin under it, and light that dips with each beat
+ * at the pulse the simulator is told, a hundredth of its level deep.
+ */
+static int hr_bpm = 64;
+static bool hr_powered;
+static int64_t hr_next_ms;
+
+int hr_hw_power(bool on, bool always)
+{
+	ARG_UNUSED(always);
+
+	hr_powered = on;
+	hr_next_ms = k_uptime_get() + 1000;
+	return 0;
+}
+
+int hr_hw_batch(struct hr_hw_batch *batch)
+{
+	static double phase;
+
+	if (!hr_powered || k_uptime_get() < hr_next_ms) {
+		return -ENODATA;
+	}
+	hr_next_ms += 1000;
+	batch->worn = hr_bpm > 0;
+	batch->count = 20;
+	for (int i = 0; i < 20; i++) {
+		uint32_t light = 12000000 + (uint32_t)(60000 * sin(phase));
+
+		phase += 2 * 3.14159265 * hr_bpm / 60 / 20;
+		batch->light[i][0] = light;
+		batch->light[i][1] = light;
+		batch->led[i] = 8;
+	}
+	return 0;
+}
+
+bool hr_hw_worn(void)
+{
+	return hr_powered && hr_bpm > 0;
+}
+
+void hr_hw_describe(char *text, size_t size)
+{
+	snprintf(text, size, "simulated, %d bpm", hr_bpm);
+}
+
+/* sim hr <bpm>: the pulse under the sensor; 0 takes the watch off */
+static int cmd_hr(const struct shell *sh, size_t argc, char **argv)
+{
+	hr_bpm = atoi(argv[1]);
 	return 0;
 }
 
@@ -407,6 +464,8 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sim_cmds,
 	SHELL_CMD_ARG(baro, NULL, "on | off: the barometer answers, or not", cmd_baro, 2, 0),
 	SHELL_CMD_ARG(compass, NULL, "<degrees>: where twelve o'clock points", cmd_compass, 2, 0),
 	SHELL_CMD_ARG(gps, NULL, "off | <latitude> <longitude> [altitude m]", cmd_gps, 2, 2),
+	SHELL_CMD_ARG(hr, NULL, "<bpm>: the pulse under the sensor; 0 takes the watch off", cmd_hr, 2,
+		      0),
 	SHELL_CMD_ARG(move, NULL, "<km/h> <heading> [climb m/min]: move from where gps put it",
 		      cmd_move, 3, 1),
 	SHELL_CMD_ARG(pair, NULL, "<passkey> | off: the pairing screen", cmd_pair, 2, 0),

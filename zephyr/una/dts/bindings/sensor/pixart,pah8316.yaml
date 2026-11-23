@@ -1,0 +1,23 @@
+description: |
+  PixArt PAH8316LS optical heart-rate sensor on I2C (drivers/sensor/pah8316).
+
+  The chip and its LEDs have no supply until a sampling frequency is set,
+  and lose it when that is set to 0.
+
+compatible: "pixart,pah8316"
+
+include: [sensor-device.yaml, i2c-device.yaml]
+
+properties:
+  irq-gpios:
+    type: phandle-array
+    required: true
+    description: The chip's interrupt line, which rises and stays up until served.
+
+  enable-gpios:
+    type: phandle-array
+    description: Switches the chip's supply. Without it the supply is taken to be on.
+
+  led-enable-gpios:
+    type: phandle-array
+    description: Switches the LEDs' supply. Without it the supply is taken to be on.

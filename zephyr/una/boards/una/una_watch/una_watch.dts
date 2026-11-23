@@ -125,9 +125,8 @@
 		/* ALTIMETER_EN: the barometer's supply. */
 		baro-en-gpios = <&gpiog 0 GPIO_ACTIVE_HIGH>;
 		/*
-		 * The heart-rate sensor: PPG_EN is its 1.8 V, VLED_EN the 4 V
-		 * of its LEDs, and its interrupt line rises. Only the build
-		 * with PixArt's library (hr-ref.conf) drives them so far.
+		 * The heart-rate sensor's pins once more, for the build with
+		 * PixArt's library in place of the driver (hr-ref.conf).
 		 */
 		ppg-en-gpios = <&gpiof 13 GPIO_ACTIVE_HIGH>;
 		ppg-led-en-gpios = <&gpiog 10 GPIO_ACTIVE_HIGH>;
@@ -265,13 +264,23 @@ zephyr_udc0: &usbotg_hs {
 /*
  * The barometer's bus: MS5837-02BA at 0x76. The app drives the sensor itself
  * (src/baro_hw.c), as its supply is switched. The heart-rate sensor is on
- * this bus too (PAH8316, 0x40), unpowered so far.
+ * this bus too, with the driver in this tree (drivers/sensor/pah8316): its
+ * 1.8 V comes by PPG_EN and the 4 V of its LEDs by VLED_EN, both off until
+ * the driver is asked for samples.
  */
 &i2c2 {
 	pinctrl-0 = <&i2c2_scl_pb13 &i2c2_sda_pb14>;
 	pinctrl-names = "default";
 	clock-frequency = <I2C_BITRATE_FAST>;
 	status = "okay";
+
+	ppg: pah8316@40 {
+		compatible = "pixart,pah8316";
+		reg = <0x40>;
+		irq-gpios = <&gpiof 12 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
+		enable-gpios = <&gpiof 13 GPIO_ACTIVE_HIGH>;
+		led-enable-gpios = <&gpiog 10 GPIO_ACTIVE_HIGH>;
+	};
 };
 
 /*
@@ -361,26 +370,6 @@ zephyr_udc0: &usbotg_hs {
 		reset-event;
 		req-ll-only;
 		reset-assert-duration-ms = <6>;
-	};
-};
-
-/*
- * Power enables of parts nothing drives yet, held off as the stock kernel
- * boots them. Left floating, the GNSS module's own pull-up turns it on.
- */
-&gpiog {
-	vled-en-hog {
-		gpio-hog;
-		gpios = <10 GPIO_ACTIVE_HIGH>;
-		output-low;
-	};
-};
-
-&gpiof {
-	ppg-en-hog {
-		gpio-hog;
-		gpios = <13 GPIO_ACTIVE_HIGH>;
-		output-low;
 	};
 };
 

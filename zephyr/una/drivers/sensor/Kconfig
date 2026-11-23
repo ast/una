@@ -1,2 +1,3 @@
 rsource "bmi270/Kconfig"
 rsource "bmm350/Kconfig"
+rsource "pah8316/Kconfig"

@@ -18,6 +18,8 @@ target_sources(app PRIVATE
   src/fonts/font_text_14.c
   src/fonts/font_text_20.c
   src/gnss.c
+  src/hr.c
+  src/hr_alg.c
   src/main.c
   src/messages.c
   src/motion.c
@@ -39,6 +41,7 @@ if(CONFIG_BOARD_UNA_WATCH)
     src/alert_hw.c
     src/baro_hw.c
     src/compass_hw.c
+    src/hr_hw.c
     src/motion_hw.c
     src/power.c
     src/storage.c
