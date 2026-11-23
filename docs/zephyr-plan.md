@@ -280,6 +280,23 @@ Looked at again the morning after (23 Nov), with the phone left paired:
 - The stock firmware never asks for latency: it prefers 7.5 to 75 ms and
   leaves the rest to the phone.
 
+The losses are USB at high speed (23 Nov, afternoon). A morning on the
+wrist: one connection for 3 h 14 min at 180 ms and latency 4, not one loss.
+The cable went in and the link was lost 80 s later and then about every
+40 s, at -37 dBm, for as long as it was looked at (10 losses in some 8 min;
+one in 3 min with nothing asked over USB, one in 90 s held at latency 0).
+With `maximum-speed = "full-speed"` on the USB controller and nothing else
+changed: none in 7 min, a megabyte of log copied meanwhile. So it is not
+the pace, the latency or the chip's connection updates but the watch's own
+USB deafening its receiver, 480 MHz having a harmonic at 2400 MHz; the
+evening of pairing was spent on the cable. Not separated: the phone chose
+180 ms after the change and 120 ms before it. Why an hour on the cable the
+morning before had no loss is not known. USB is at full speed for now, so
+that Bluetooth can be tried on the cable: a log file of 1 MB takes 20 s to
+copy. To come back to: high speed again, and whether the losses can be had
+without giving it up (a longer run each way at one pace first; MCUboot on
+the watch is still at high speed).
+
 Barometer (v0.5.0): the MS5837-02BA is driven by the app (`src/baro.c`,
 `src/baro_hw.c`), not by Zephyr's driver, which reads the calibration at
 boot, when the sensor here has no supply, and without the pause after reset

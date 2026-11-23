@@ -232,6 +232,12 @@ zephyr_udc0: &usbotg_hs {
 	pinctrl-0 = <&usb_otg_hs_dm_pa11 &usb_otg_hs_dp_pa12>;
 	pinctrl-names = "default";
 	status = "okay";
+	/*
+	 * Not high speed: with it the radio loses the phone (0x08) about every
+	 * 40 s for as long as the cable is in. 480 MHz has a harmonic at 2.4 GHz.
+	 * For now: docs/zephyr-plan.md has what is left to find out.
+	 */
+	maximum-speed = "full-speed";
 
 	/* Shell and log. */
 	cdc_acm_uart0: cdc_acm_uart0 {

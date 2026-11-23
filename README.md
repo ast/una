@@ -89,14 +89,14 @@ each of them.
 | STM32U5A5 MCU | works | clocks, RTC, watchdog, Stop 2 when idle | idle draws about 1 mA, the stock firmware 0.07 to 0.08: see below |
 | Display, Sharp LS012B7DD06A | works | own driver (`zephyr/una/drivers/display`), LVGL, backlight | |
 | Buttons, four | works | press and hold, wake from Stop | |
-| USB-C, high speed | works | shell and firmware update on two serial ports; off on battery | the volume as a USB drive |
+| USB-C, high speed | works | shell and firmware update on two serial ports, at full speed (high speed deafens the radio); off on battery | the volume as a USB drive |
 | eMMC, 4 GB | works | the stock user volume (exFAT): logs and recordings | |
 | PMIC and charger, PCA9420 | works | charger state and limit read, power off (registers, in `src/power.c`) | |
 | Fuel gauge, MAX17262 | works | percentage, voltage, current, charge | its model is the stock one and reads full too long: worked around in `charge()` |
 | Buzzer | works | timer, alarm, calls | |
 | Vibration motor, DRV2625 | works | nudges and ringing, open loop (`src/alert_hw.c`) | its calibrated closed-loop mode |
 | GPS, Airoha AG3335M | works | own driver (`zephyr/una/drivers/gnss`): fix in about a minute, position, speed, satellites | assisted start (EPO), a whole track checked outdoors, the count of satellites heard is too low |
-| Bluetooth, ST BlueNRG-2N | works | Zephyr's stack, the chip as a plain controller (needs ST's firmware 3.4.0 in it): one serial service for a paired phone, Gadgetbridge | a link that is often lost; see Phone |
+| Bluetooth, ST BlueNRG-2N | works | Zephyr's stack, the chip as a plain controller (needs ST's firmware 3.4.0 in it): one serial service for a paired phone, Gadgetbridge | |
 | USB-C controller, STUSB4500 | not driven | charges at its defaults | reading what the cable offers |
 | Barometer, MS5837-02BA | works | on while recording, read once a second (`src/baro_hw.c`): climb, and altitude in the file | floors; what it costs in current is not measured |
 | Accelerometer and gyro, BMI270 | works, not yet tried on a wrist | own driver (`zephyr/una/drivers/sensor/bmi270`, made of Zephyr's): the chip's step counter and activity, read once a minute; a turn of the wrist lights the screen (`src/motion_hw.c`) | steps and wrist turn checked on a wrist; steps kept over a restart, shown on a page and stored per day; cadence; what it costs in current |
@@ -412,8 +412,10 @@ earlier firmware for the chip's own stack (`src/bluenrg.c` with ST's ACI
 commands, as it was before) was seen to work on 3.4.0 too.
 
 The link was often lost on the evening pairing was made ("disconnected:
-0x08" in the log, a timeout; made again within seconds), and not once the
-morning after in an hour of trying to provoke it; see `docs/zephyr-plan.md`.
+0x08" in the log, a timeout; made again within seconds). That was the
+watch's own USB at high speed, with the cable in: on the wrist the link
+holds for hours, and USB is now kept at full speed, with which it holds on
+the cable too; see `docs/zephyr-plan.md`.
 `una-z sh radio` counts such losses, and `una-z sh radio pace MIN MAX LATENCY
 TIMEOUT` (milliseconds, but for the latency) asks the phone for another
 pace, for trying things.
