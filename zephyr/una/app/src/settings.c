@@ -19,6 +19,7 @@ enum {
 	ROW_SOUND,
 	ROW_VIBRATION,
 	ROW_BLUETOOTH,
+	ROW_FORGET,
 	ROW_POWER_OFF,
 	ROW_COUNT,
 };
@@ -28,6 +29,7 @@ static struct ui_list list = {.quiet = true};
 static const char *row_text(int index)
 {
 	static char text[24];
+	struct bluetooth_status radio;
 
 	switch (index) {
 	case ROW_BACKLIGHT:
@@ -44,6 +46,11 @@ static const char *row_text(int index)
 		return alert_vibration() ? "Vibration on" : "Vibration off";
 	case ROW_BLUETOOTH:
 		return bluetooth_is_set() ? "Bluetooth on" : "Bluetooth off";
+	case ROW_FORGET:
+		/* Held, as it cannot be taken back. */
+		bluetooth_status(&radio);
+		snprintf(text, sizeof(text), "Hold: unpair (%u)", radio.bonds);
+		return text;
 	default:
 		/* Asked for by holding, in place of a question afterwards. */
 		return "Hold: power off";
@@ -92,6 +99,10 @@ static bool settings_key(enum ui_key key, bool held)
 		if (key == UI_KEY_SELECT && list.selected == ROW_POWER_OFF) {
 			/* Does not return on battery; on USB power the PMIC starts again. */
 			power_off();
+		}
+		if (key == UI_KEY_SELECT && list.selected == ROW_FORGET) {
+			bluetooth_forget();
+			alert_blip();
 		}
 		return true;
 	}

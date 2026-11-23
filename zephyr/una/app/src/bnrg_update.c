@@ -65,6 +65,10 @@ bool bluetooth_is_set(void)
 	return false;
 }
 
+void bluetooth_forget(void)
+{
+}
+
 void bluetooth_status(struct bluetooth_status *status)
 {
 	*status = (struct bluetooth_status){.state = BLUETOOTH_OFF};

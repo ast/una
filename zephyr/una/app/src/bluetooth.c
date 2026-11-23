@@ -1,15 +1,20 @@
 /*
- * Bluetooth, with Zephyr's own host stack. The radio chip (BlueNRG-2N) is
- * told to be a plain controller, which it does properly from ST's firmware
- * 3.4.0 on: see bnrg-update.conf for how that gets into it.
+ * Bluetooth, with Zephyr's host stack. The watch is a peripheral with one
+ * service of its own, the Nordic UART service, a serial line to the phone:
+ * what the phone writes goes to phone_rx(), bluetooth_send() notifies it.
  *
- * The watch offers one service, the Nordic UART service, a serial line to
- * the phone. What the phone writes goes to phone_rx(), bluetooth_send()
- * notifies it.
+ * The line is only for a phone that has paired: the watch shows six digits,
+ * the phone's owner types them in (LE Secure Connections, passkey entry),
+ * and the bond is kept in settings. A link that is not encrypted with such
+ * a bond within a minute is dropped.
  *
- * One thread turns the radio on and off as set, keeps it advertising while
- * no phone is connected, and passes on what the stack's callbacks leave for
- * it: they run on the stack's own threads, where nothing may wait.
+ * The stack's callbacks run on its own threads, where nothing may wait. What
+ * takes time is handed to a work queue of this file's, which is also the
+ * only place the radio is turned on and off from.
+ *
+ * On the watch the controller is ST's BlueNRG-2N, told to be no more than a
+ * controller (firmware 3.4.0 or later: see bnrg-update.conf). What is ST's
+ * own is in chip_setup(); nothing else here knows the chip.
  */
 
 #include <stdio.h>
@@ -20,7 +25,10 @@
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/bluetooth/services/nus.h>
+#include <zephyr/bluetooth/services/nus/inst.h>
+#include <zephyr/drivers/bluetooth.h>
 #include <zephyr/drivers/hwinfo.h>
+#include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/settings/settings.h>
@@ -31,64 +39,114 @@
 #include <zephyr/sys/util.h>
 
 #include "bluetooth.h"
+#include "pairing.h"
 #include "phone.h"
 #include "ui.h"
 
 LOG_MODULE_REGISTER(bluetooth, LOG_LEVEL_INF);
 
-/* ST's own commands, which the chip takes as a plain controller too. */
-#define HAL_FIRMWARE_DETAILS BT_OP(BT_OGF_VS, 0x001)
-#define HAL_SET_TX_POWER     BT_OP(BT_OGF_VS, 0x00f)
-
 /* A second between advertisements: found in a few seconds, at little cost. */
 #define ADVERTISE_MIN 0x0640
 #define ADVERTISE_MAX 0x0780
 
+/* Encrypted, with a key the owner vouched for by typing the passkey. */
+#define SECURE BT_SECURITY_L3
+/* How long a phone has to get there: time enough to type six digits. */
+#define SECURE_WITHIN K_SECONDS(60)
+
 /*
- * How well the phone is heard, asked of the chip now and then. It is in the
- * log every minute: a chip that answers still has a link, whatever else.
+ * A phone connects at a fast pace, which pairing and finding the services
+ * are glad of. Once the line has been open for a while the watch asks for
+ * the slow one it would like (CONFIG_BT_PERIPHERAL_PREF_*), which is what
+ * the battery pays for all day.
  */
-#define RSSI_FIRST_MS 20000
-#define RSSI_EVERY_MS 60000
+#define SLOW_AFTER K_SECONDS(15)
 
-/* What a callback leaves for the thread to do. */
-enum {
-	DO_ADVERTISE,
-	DO_OPENED, /* the phone listens */
-	DO_CLOSED, /* the link is gone */
-	DO_RESTART,
-	DO_COUNT,
+/*
+ * How well the phone is heard, asked of the controller now and then. It is
+ * in the log every minute: one that answers still has a link.
+ */
+#define RSSI_FIRST K_SECONDS(20)
+#define RSSI_EVERY K_SECONDS(60)
+
+/* After the rest of the watch has started. */
+#define START_AFTER K_SECONDS(3)
+
+/*
+ * The serial service, as Zephyr's own instance of it but for the permissions:
+ * to listen and to write takes an authenticated link.
+ */
+BT_GATT_SERVICE_DEFINE(nus_service,
+	BT_GATT_PRIMARY_SERVICE(BT_UUID_NUS_SERVICE),
+	BT_GATT_CHARACTERISTIC(BT_UUID_NUS_TX_CHAR, BT_GATT_CHRC_NOTIFY, BT_GATT_PERM_NONE, NULL,
+			       NULL, NULL),
+	BT_GATT_CCC(nus_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE_AUTHEN),
+	BT_GATT_CHARACTERISTIC(BT_UUID_NUS_RX_CHAR,
+			       BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
+			       BT_GATT_PERM_WRITE_AUTHEN, NULL, nus_bt_chr_write, NULL),
+);
+static sys_slist_t nus_callback_list = SYS_SLIST_STATIC_INIT(&nus_callback_list);
+STRUCT_SECTION_ITERABLE(bt_nus_inst, nus) = {
+	.svc = &nus_service,
+	.cbs = &nus_callback_list,
 };
-static ATOMIC_DEFINE(todo, DO_COUNT);
-static K_SEM_DEFINE(wake, 0, 1);
+/* The characteristic the phone subscribes to. */
+#define NUS_TX_ATTR (&nus_service.attrs[1])
 
-/* What the phone wrote, on its way to the thread. */
+/* The name in the advertisement, the service in what a scan is answered. */
+static const struct bt_data advertisement[] = {
+	BT_DATA_BYTES(BT_DATA_FLAGS, BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR),
+	BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME, sizeof(CONFIG_BT_DEVICE_NAME) - 1),
+};
+static const struct bt_data scan_response[] = {
+	BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_NUS_SRV_VAL),
+};
+
+/* What the phone wrote, on its way from the stack's thread to the queue. */
 struct chunk {
 	uint16_t len;
 	uint8_t data[CONFIG_BT_L2CAP_TX_MTU - 3];
 };
 K_MSGQ_DEFINE(received, sizeof(struct chunk), 8, 2);
 
+static K_THREAD_STACK_DEFINE(queue_stack, 4096);
+static struct k_work_q queue;
+
+static void apply(struct k_work *work);
+static void advertise(struct k_work *work);
+static void receive(struct k_work *work);
+static void tell_phone(struct k_work *work);
+static void forget(struct k_work *work);
+static void read_rssi(struct k_work *work);
+static void check_secure(struct k_work *work);
+static void slow_down(struct k_work *work);
+
+static K_WORK_DELAYABLE_DEFINE(apply_work, apply);
+static K_WORK_DEFINE(advertise_work, advertise);
+static K_WORK_DEFINE(receive_work, receive);
+static K_WORK_DEFINE(tell_phone_work, tell_phone);
+static K_WORK_DEFINE(forget_work, forget);
+static K_WORK_DELAYABLE_DEFINE(rssi_work, read_rssi);
+static K_WORK_DELAYABLE_DEFINE(secure_work, check_secure);
+static K_WORK_DELAYABLE_DEFINE(slow_work, slow_down);
+
 static uint8_t set_on = 1;
-static bool tried;
+static atomic_t restart_wanted;
+static atomic_t link_closed;
+/* Of the queue alone: whether the stack runs. */
+static bool on;
 
 static struct k_spinlock lock;
 static enum bluetooth_state state = BLUETOOTH_OFF;
 static struct bt_conn *link;
 static bool listening;
+static uint8_t security;
 static uint16_t interval_ms, latency, mtu;
 static bt_addr_le_t peer, own;
-static int64_t connected_at_ms, rssi_at_ms;
+static int64_t connected_at_ms;
 static uint32_t connects, resets, rx_bytes, tx_bytes;
 static int rssi_status;
 static int8_t rssi;
-
-static void address_string(char *str, size_t size, const bt_addr_le_t *address)
-{
-	const uint8_t *a = address->a.val;
-
-	snprintf(str, size, "%02X:%02X:%02X:%02X:%02X:%02X", a[5], a[4], a[3], a[2], a[1], a[0]);
-}
 
 static void set_state(enum bluetooth_state to)
 {
@@ -96,12 +154,6 @@ static void set_state(enum bluetooth_state to)
 		state = to;
 	}
 	ui_refresh();
-}
-
-static void ask(int what)
-{
-	atomic_set_bit(todo, what);
-	k_sem_give(&wake);
 }
 
 /* The link, held on to until bt_conn_unref(); NULL when there is none. */
@@ -117,6 +169,13 @@ static struct bt_conn *link_ref(void)
 	return conn;
 }
 
+/* The public face */
+
+static void count_bond(const struct bt_bond_info *info, void *count)
+{
+	(*(uint8_t *)count)++;
+}
+
 void bluetooth_status(struct bluetooth_status *status)
 {
 	memset(status, 0, sizeof(*status));
@@ -128,10 +187,11 @@ void bluetooth_status(struct bluetooth_status *status)
 		status->rx_bytes = rx_bytes;
 		status->tx_bytes = tx_bytes;
 		if (state == BLUETOOTH_ADVERTISING || state == BLUETOOTH_CONNECTED) {
-			address_string(status->own, sizeof(status->own), &own);
+			bt_addr_to_str(&own.a, status->own, sizeof(status->own));
 		}
 		if (state == BLUETOOTH_CONNECTED) {
-			address_string(status->peer, sizeof(status->peer), &peer);
+			bt_addr_to_str(&peer.a, status->peer, sizeof(status->peer));
+			status->secure = security >= SECURE;
 			status->interval_ms = interval_ms;
 			status->latency = latency;
 			status->mtu = mtu;
@@ -140,6 +200,9 @@ void bluetooth_status(struct bluetooth_status *status)
 			status->rssi_status = rssi_status;
 		}
 	}
+	if (status->state != BLUETOOTH_OFF && status->state != BLUETOOTH_FAILED) {
+		bt_foreach_bond(BT_ID_DEFAULT, count_bond, &status->bonds);
+	}
 }
 
 bool bluetooth_is_set(void)
@@ -147,12 +210,11 @@ bool bluetooth_is_set(void)
 	return set_on;
 }
 
-void bluetooth_set(bool on)
+void bluetooth_set(bool to)
 {
-	set_on = on;
-	tried = false;
+	set_on = to;
 	settings_save_one("radio/on", &set_on, sizeof(set_on));
-	k_sem_give(&wake);
+	k_work_reschedule_for_queue(&queue, &apply_work, K_NO_WAIT);
 }
 
 static int bluetooth_setting_set(const char *name, size_t len, settings_read_cb read_cb,
@@ -165,6 +227,11 @@ static int bluetooth_setting_set(const char *name, size_t len, settings_read_cb 
 }
 SETTINGS_STATIC_HANDLER_DEFINE(radio, "radio", NULL, bluetooth_setting_set, NULL, NULL);
 
+void bluetooth_forget(void)
+{
+	k_work_submit_to_queue(&queue, &forget_work);
+}
+
 bool bluetooth_send(const void *data, size_t len)
 {
 	struct bt_conn *conn = link_ref();
@@ -173,7 +240,7 @@ bool bluetooth_send(const void *data, size_t len)
 
 	while (sent && len > 0) {
 		size_t n = MIN(len, bt_gatt_get_mtu(conn) - 3);
-		int ret = bt_nus_send(conn, at, n);
+		int ret = bt_nus_inst_send(conn, &nus, at, n);
 
 		if (ret != 0) {
 			LOG_WRN("send: %d", ret);
@@ -192,20 +259,34 @@ bool bluetooth_send(const void *data, size_t len)
 	return sent;
 }
 
-/* The stack's callbacks */
+/* The stack's callbacks: note what happened, leave the rest to the queue. */
+
+/* The phone listens when it has subscribed over a link that is secure. */
+static void update_listening(struct bt_conn *conn)
+{
+	bool now = bt_conn_get_security(conn) >= SECURE &&
+		   bt_gatt_is_subscribed(conn, NUS_TX_ATTR, BT_GATT_CCC_NOTIFY);
+
+	K_SPINLOCK(&lock) {
+		listening = now && conn == link;
+	}
+	k_work_submit_to_queue(&queue, &tell_phone_work);
+	ui_refresh();
+}
 
 static void on_connected(struct bt_conn *conn, uint8_t err)
 {
 	struct bt_conn_info info;
-	char str[18];
+	char str[BT_ADDR_LE_STR_LEN];
 
 	if (err != 0) {
-		LOG_WRN("a connection failed: 0x%02x", err);
+		LOG_WRN("a connection failed: 0x%02x %s", err, bt_hci_err_to_str(err));
 		return;
 	}
 	K_SPINLOCK(&lock) {
 		link = bt_conn_ref(conn);
 		listening = false;
+		security = bt_conn_get_security(conn);
 		peer = *bt_conn_get_dst(conn);
 		mtu = bt_gatt_get_mtu(conn);
 		interval_ms = 0;
@@ -215,16 +296,22 @@ static void on_connected(struct bt_conn *conn, uint8_t err)
 			latency = info.le.latency;
 		}
 		connected_at_ms = k_uptime_get();
-		rssi_at_ms = connected_at_ms + RSSI_FIRST_MS - RSSI_EVERY_MS;
 		rssi = 0;
 		rssi_status = 0;
 		connects++;
 		state = BLUETOOTH_CONNECTED;
 	}
-	address_string(str, sizeof(str), &peer);
+	bt_addr_le_to_str(&peer, str, sizeof(str));
 	LOG_INF("connected to %s, interval %u ms", str, interval_ms);
+	/*
+	 * Security is the phone's to start: one with a bond encrypts by itself,
+	 * one without is refused the serial line and pairs to get it. Asking
+	 * for it from here as well collides with a phone that has begun, and
+	 * Android then never tells its apps of the link.
+	 */
+	k_work_reschedule_for_queue(&queue, &secure_work, SECURE_WITHIN);
+	k_work_reschedule_for_queue(&queue, &rssi_work, RSSI_FIRST);
 	ui_refresh();
-	k_sem_give(&wake);
 }
 
 static void on_disconnected(struct bt_conn *conn, uint8_t reason)
@@ -236,6 +323,7 @@ static void on_disconnected(struct bt_conn *conn, uint8_t reason)
 			was = link;
 			link = NULL;
 			listening = false;
+			security = 0;
 			state = BLUETOOTH_STARTING;
 		}
 	}
@@ -243,14 +331,17 @@ static void on_disconnected(struct bt_conn *conn, uint8_t reason)
 		return;
 	}
 	bt_conn_unref(was);
-	LOG_INF("disconnected, reason 0x%02x", reason);
-	ask(DO_CLOSED);
+	LOG_INF("disconnected: 0x%02x %s", reason, bt_hci_err_to_str(reason));
+	pairing_hide();
+	atomic_set(&link_closed, 1);
+	k_work_submit_to_queue(&queue, &tell_phone_work);
+	ui_refresh();
 }
 
 /* The connection is free to be had again: only now can advertising start. */
 static void on_recycled(void)
 {
-	ask(DO_ADVERTISE);
+	k_work_submit_to_queue(&queue, &advertise_work);
 }
 
 static void on_param_updated(struct bt_conn *conn, uint16_t interval, uint16_t new_latency,
@@ -264,11 +355,32 @@ static void on_param_updated(struct bt_conn *conn, uint16_t interval, uint16_t n
 		timeout * 10);
 }
 
+static void on_security_changed(struct bt_conn *conn, bt_security_t level,
+				enum bt_security_err err)
+{
+	if (err != BT_SECURITY_ERR_SUCCESS) {
+		/* Most often a bond that one side has and the other has forgotten. */
+		LOG_WRN("not secured: %d %s", err, bt_security_err_to_str(err));
+		bt_conn_disconnect(conn, BT_HCI_ERR_AUTH_FAIL);
+		return;
+	}
+	K_SPINLOCK(&lock) {
+		if (conn == link) {
+			security = level;
+			/* Known by its own address now, if it came under another. */
+			peer = *bt_conn_get_dst(conn);
+		}
+	}
+	LOG_INF("security level %d", level);
+	update_listening(conn);
+}
+
 BT_CONN_CB_DEFINE(conn_callbacks) = {
 	.connected = on_connected,
 	.disconnected = on_disconnected,
 	.recycled = on_recycled,
 	.le_param_updated = on_param_updated,
+	.security_changed = on_security_changed,
 };
 
 static void on_mtu(struct bt_conn *conn, uint16_t tx, uint16_t rx)
@@ -280,15 +392,14 @@ static void on_mtu(struct bt_conn *conn, uint16_t tx, uint16_t rx)
 
 static struct bt_gatt_cb gatt_callbacks = {.att_mtu_updated = on_mtu};
 
-static void on_listening(bool enabled, void *ctx)
+static void on_subscribed(bool enabled, void *ctx)
 {
-	K_SPINLOCK(&lock) {
-		listening = enabled && link != NULL;
+	struct bt_conn *conn = link_ref();
+
+	if (conn != NULL) {
+		update_listening(conn);
+		bt_conn_unref(conn);
 	}
-	if (enabled) {
-		ask(DO_OPENED);
-	}
-	ui_refresh();
 }
 
 static void on_received(struct bt_conn *conn, const void *data, uint16_t len, void *ctx)
@@ -303,20 +414,67 @@ static void on_received(struct bt_conn *conn, const void *data, uint16_t len, vo
 	if (k_msgq_put(&received, &chunk, K_MSEC(500)) != 0) {
 		LOG_ERR("%u bytes from the phone lost: nobody takes them", len);
 	}
-	k_sem_give(&wake);
+	k_work_submit_to_queue(&queue, &receive_work);
 }
 
 static struct bt_nus_cb nus_callbacks = {
-	.notif_enabled = on_listening,
+	.notif_enabled = on_subscribed,
 	.received = on_received,
 };
 
-/* The thread's own */
+/* Pairing: the watch can show a passkey and nothing else. */
+
+static void cancel_pairing(void)
+{
+	struct bt_conn *conn = link_ref();
+
+	if (conn != NULL) {
+		bt_conn_auth_cancel(conn);
+		bt_conn_unref(conn);
+	}
+}
+
+static void on_passkey(struct bt_conn *conn, unsigned int passkey)
+{
+	/* Not logged: it is for the eyes of whoever holds the watch. */
+	LOG_INF("pairing: the passkey is on the screen");
+	pairing_show(passkey, cancel_pairing);
+}
+
+static void on_pairing_cancelled(struct bt_conn *conn)
+{
+	LOG_INF("pairing given up");
+	pairing_hide();
+}
+
+static struct bt_conn_auth_cb auth_callbacks = {
+	.passkey_display = on_passkey,
+	.cancel = on_pairing_cancelled,
+};
+
+static void on_paired(struct bt_conn *conn, bool bonded)
+{
+	LOG_INF("paired%s", bonded ? ", and the bond kept" : "");
+	pairing_hide();
+}
+
+static void on_pairing_failed(struct bt_conn *conn, enum bt_security_err reason)
+{
+	LOG_WRN("pairing failed: %d %s", reason, bt_security_err_to_str(reason));
+	pairing_hide();
+}
+
+static struct bt_conn_auth_info_cb auth_info_callbacks = {
+	.pairing_complete = on_paired,
+	.pairing_failed = on_pairing_failed,
+};
+
+/* The queue's work */
 
 /*
  * The address to go by: a static random one made of the SoC's serial number,
- * and not the one the chip keeps, by which the phone knows the watch as it
- * was sold. Before the stack starts, so that it has no other.
+ * the same at every start, so that a phone's bond holds. Set before the
+ * stack starts, which then takes no other.
  */
 static int set_address(void)
 {
@@ -341,7 +499,7 @@ static int set_address(void)
 	return ret < 0 ? ret : 0;
 }
 
-static int vendor_cmd(uint16_t opcode, const void *params, size_t len, struct net_buf **rsp)
+static int hci_cmd(uint16_t opcode, const void *params, size_t len, struct net_buf **rsp)
 {
 	struct net_buf *buf = bt_hci_cmd_alloc(K_SECONDS(1));
 
@@ -352,13 +510,57 @@ static int vendor_cmd(uint16_t opcode, const void *params, size_t len, struct ne
 	return bt_hci_cmd_send_sync(opcode, buf, rsp);
 }
 
-/* What the chip runs, for the log; and whether that will do. */
-static void check_firmware(void)
+#if defined(CONFIG_BT_BLUENRG_ACI)
+/* ST's own commands, which the chip takes as a plain controller too. */
+#define HAL_FIRMWARE_DETAILS BT_OP(BT_OGF_VS, 0x001)
+#define HAL_SET_TX_POWER     BT_OP(BT_OGF_VS, 0x00f)
+
+/*
+ * When a phone connects under an address the chip cannot resolve, which is
+ * every phone until it has paired, the chip's "enhanced connection complete"
+ * has that address in the field for a resolved peer's and all ones where it
+ * belongs. Pairing computes with the address and fails on such a one. So the
+ * events pass through here on their way from the driver to the host, and
+ * this one is put right.
+ */
+static bt_hci_recv_t host_recv;
+
+static int chip_recv(const struct device *dev, struct net_buf *buf)
 {
+	struct {
+		uint8_t type;
+		struct bt_hci_evt_hdr hdr;
+		struct bt_hci_evt_le_meta_event meta;
+		struct bt_hci_evt_le_enh_conn_complete evt;
+	} __packed *p = (void *)buf->data;
+
+	if (buf->len >= sizeof(*p) && p->type == BT_HCI_H4_EVT &&
+	    p->hdr.evt == BT_HCI_EVT_LE_META_EVENT &&
+	    p->meta.subevent == BT_HCI_EVT_LE_ENH_CONN_COMPLETE &&
+	    bt_addr_eq(&p->evt.peer_addr.a, BT_ADDR_NONE) &&
+	    !bt_addr_eq(&p->evt.peer_rpa, BT_ADDR_ANY)) {
+		bt_addr_copy(&p->evt.peer_addr.a, &p->evt.peer_rpa);
+		bt_addr_copy(&p->evt.peer_rpa, BT_ADDR_ANY);
+	}
+	return host_recv(dev, buf);
+}
+
+/* The BlueNRG-2N: which firmware it has, for the log, and its power. */
+static void chip_setup(void)
+{
+	static const uint8_t power[] = {1, 7}; /* +8 dBm, as the stock firmware */
+	struct bt_hci_driver_data *driver = DEVICE_DT_GET(DT_CHOSEN(zephyr_bt_hci))->data;
 	struct net_buf *rsp = NULL;
 	const uint8_t *d;
+	int ret;
 
-	if (vendor_cmd(HAL_FIRMWARE_DETAILS, NULL, 0, &rsp) != 0 || rsp->len < 10) {
+	/* The driver is given the host's function anew at every start. */
+	if (driver->recv != chip_recv) {
+		host_recv = driver->recv;
+		driver->recv = chip_recv;
+	}
+
+	if (hci_cmd(HAL_FIRMWARE_DETAILS, NULL, 0, &rsp) != 0 || rsp->len < 10) {
 		LOG_WRN("the chip does not say what firmware it has");
 	} else {
 		d = &rsp->data[1];
@@ -372,11 +574,19 @@ static void check_firmware(void)
 	if (rsp != NULL) {
 		net_buf_unref(rsp);
 	}
+	ret = hci_cmd(HAL_SET_TX_POWER, power, sizeof(power), NULL);
+	if (ret != 0) {
+		LOG_WRN("transmit power not set: %d", ret);
+	}
 }
+#else
+static void chip_setup(void)
+{
+}
+#endif
 
 static bool turn_on(void)
 {
-	static const uint8_t power[] = {1, 7}; /* +8 dBm, as the stock firmware */
 	static bool registered;
 	size_t count = 1;
 	int ret;
@@ -392,64 +602,86 @@ static bool turn_on(void)
 	}
 	if (!registered) {
 		bt_gatt_cb_register(&gatt_callbacks);
-		bt_nus_cb_register(&nus_callbacks, NULL);
+		bt_nus_inst_cb_register(&nus, &nus_callbacks, NULL);
+		bt_conn_auth_cb_register(&auth_callbacks);
+		bt_conn_auth_info_cb_register(&auth_info_callbacks);
 		registered = true;
 	}
-	bt_id_get(&own, &count);
-	check_firmware();
-	ret = vendor_cmd(HAL_SET_TX_POWER, power, sizeof(power), NULL);
+	/* The bonds, and what their phones had subscribed to. */
+	ret = settings_load_subtree("bt");
 	if (ret != 0) {
-		LOG_WRN("transmit power not set: %d", ret);
+		LOG_WRN("bonds not loaded: %d", ret);
 	}
+	bt_id_get(&own, &count);
+	chip_setup();
 	return true;
-}
-
-static void closed(void)
-{
-	struct chunk chunk;
-
-	while (k_msgq_get(&received, &chunk, K_NO_WAIT) == 0) {
-	}
-	phone_disconnected();
 }
 
 static void turn_off(void)
 {
+	struct k_work_sync sync;
 	struct bt_conn *was;
 	int ret = bt_disable();
 
 	if (ret != 0 && ret != -EALREADY) {
 		LOG_ERR("the radio did not stop: %d", ret);
 	}
+	k_work_cancel_delayable_sync(&rssi_work, &sync);
+	k_work_cancel_delayable_sync(&secure_work, &sync);
+	k_work_cancel_delayable_sync(&slow_work, &sync);
 	/* The stack drops a link without saying so when it is stopped. */
 	K_SPINLOCK(&lock) {
 		was = link;
 		link = NULL;
 		listening = false;
+		security = 0;
 	}
-	atomic_clear(todo);
 	if (was != NULL) {
 		bt_conn_unref(was);
-		closed();
+		atomic_set(&link_closed, 1);
+	}
+	pairing_hide();
+	tell_phone(NULL);
+}
+
+/* The radio as it is set to be, and started over when that is asked for. */
+static void apply(struct k_work *work)
+{
+	if (atomic_clear(&restart_wanted) && on) {
+		LOG_WRN("starting the radio over, as asked");
+		turn_off();
+		on = false;
+		K_SPINLOCK(&lock) {
+			resets++;
+		}
+	}
+	if (set_on && !on) {
+		on = turn_on();
+		if (on) {
+			advertise(NULL);
+		} else {
+			set_state(BLUETOOTH_FAILED);
+		}
+	} else if (!set_on) {
+		if (on) {
+			turn_off();
+			on = false;
+		}
+		set_state(BLUETOOTH_OFF);
 	}
 }
 
-/* The name in the advertisement, the service in what a scan is answered. */
-static const struct bt_data ad[] = {
-	BT_DATA_BYTES(BT_DATA_FLAGS, BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR),
-	BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME,
-		sizeof(CONFIG_BT_DEVICE_NAME) - 1),
-};
-static const struct bt_data sd[] = {
-	BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_NUS_SRV_VAL),
-};
-
-static void advertise(void)
+static void advertise(struct k_work *work)
 {
-	int ret = bt_le_adv_start(
-		BT_LE_ADV_PARAM(BT_LE_ADV_OPT_CONN, ADVERTISE_MIN, ADVERTISE_MAX, NULL), ad,
-		ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+	int ret;
 
+	if (!on || link != NULL) {
+		return;
+	}
+	ret = bt_le_adv_start(
+		BT_LE_ADV_PARAM(BT_LE_ADV_OPT_CONN, ADVERTISE_MIN, ADVERTISE_MAX, NULL),
+		advertisement, ARRAY_SIZE(advertisement), scan_response,
+		ARRAY_SIZE(scan_response));
 	if (ret == -EALREADY) {
 		return;
 	}
@@ -461,7 +693,67 @@ static void advertise(void)
 	set_state(BLUETOOTH_ADVERTISING);
 }
 
-static void read_rssi(void)
+static void receive(struct k_work *work)
+{
+	static struct chunk chunk;
+
+	while (k_msgq_get(&received, &chunk, K_NO_WAIT) == 0) {
+		phone_rx(chunk.data, chunk.len);
+	}
+}
+
+/* The line opening and closing, each told to the phone's side once. */
+static void tell_phone(struct k_work *work)
+{
+	static bool open;
+
+	if (atomic_clear(&link_closed) && open) {
+		open = false;
+		k_work_cancel_delayable(&slow_work);
+		k_msgq_purge(&received);
+		phone_disconnected();
+	}
+	if (listening && !open) {
+		open = true;
+		k_work_reschedule_for_queue(&queue, &slow_work, SLOW_AFTER);
+		phone_connected();
+	}
+}
+
+static void slow_down(struct k_work *work)
+{
+	struct bt_conn *conn = link_ref();
+	int ret;
+
+	if (conn == NULL) {
+		return;
+	}
+	/* A phone that says no keeps its own pace. */
+	ret = bt_conn_le_param_update(
+		conn, BT_LE_CONN_PARAM(CONFIG_BT_PERIPHERAL_PREF_MIN_INT,
+				       CONFIG_BT_PERIPHERAL_PREF_MAX_INT,
+				       CONFIG_BT_PERIPHERAL_PREF_LATENCY,
+				       CONFIG_BT_PERIPHERAL_PREF_TIMEOUT));
+	if (ret != 0 && ret != -EALREADY) {
+		LOG_WRN("slow pace not asked for: %d", ret);
+	}
+	bt_conn_unref(conn);
+}
+
+static void forget(struct k_work *work)
+{
+	/* Their links go with them. */
+	int ret = on ? bt_unpair(BT_ID_DEFAULT, BT_ADDR_LE_ANY) : -ENETDOWN;
+
+	if (ret != 0) {
+		LOG_WRN("bonds not forgotten: %d", ret);
+	} else {
+		LOG_INF("all bonds forgotten");
+	}
+	ui_refresh();
+}
+
+static void read_rssi(struct k_work *work)
 {
 	struct bt_conn *conn = link_ref();
 	struct bt_hci_cp_read_rssi cp;
@@ -470,14 +762,13 @@ static void read_rssi(void)
 	int8_t value = 0;
 	int ret;
 
-	rssi_at_ms = k_uptime_get();
 	if (conn == NULL) {
 		return;
 	}
 	ret = bt_hci_get_conn_handle(conn, &handle);
 	if (ret == 0) {
 		cp.handle = sys_cpu_to_le16(handle);
-		ret = vendor_cmd(BT_HCI_OP_READ_RSSI, &cp, sizeof(cp), &rsp);
+		ret = hci_cmd(BT_HCI_OP_READ_RSSI, &cp, sizeof(cp), &rsp);
 	}
 	if (ret == 0 && rsp->len >= sizeof(struct bt_hci_rp_read_rssi)) {
 		value = ((struct bt_hci_rp_read_rssi *)rsp->data)->rssi;
@@ -490,68 +781,35 @@ static void read_rssi(void)
 		rssi = value;
 		rssi_status = ret;
 	}
+	k_work_reschedule_for_queue(&queue, &rssi_work, RSSI_EVERY);
 }
 
-static void bluetooth_thread(void *p1, void *p2, void *p3)
+/* A link that has not been secured by now is not the owner's phone. */
+static void check_secure(struct k_work *work)
 {
-	static struct chunk chunk;
-	bool on = false;
+	struct bt_conn *conn = link_ref();
 
-	while (true) {
-		k_timeout_t wait = K_FOREVER;
-
-		if (atomic_test_and_clear_bit(todo, DO_RESTART) && on) {
-			LOG_WRN("starting the radio over, as asked");
-			turn_off();
-			on = false;
-			tried = false;
-			K_SPINLOCK(&lock) {
-				resets++;
-			}
-			set_state(BLUETOOTH_OFF);
-		}
-		if (set_on && !on && !tried) {
-			tried = true;
-			on = turn_on();
-			if (on) {
-				advertise();
-			} else {
-				set_state(BLUETOOTH_FAILED);
-			}
-		} else if (!set_on && (on || state != BLUETOOTH_OFF)) {
-			if (on) {
-				turn_off();
-			}
-			on = false;
-			set_state(BLUETOOTH_OFF);
-		}
-		while (k_msgq_get(&received, &chunk, K_NO_WAIT) == 0) {
-			phone_rx(chunk.data, chunk.len);
-		}
-		if (atomic_test_and_clear_bit(todo, DO_CLOSED)) {
-			closed();
-		}
-		if (atomic_test_and_clear_bit(todo, DO_OPENED) && listening) {
-			phone_connected();
-		}
-		if (atomic_test_and_clear_bit(todo, DO_ADVERTISE) && on && link == NULL) {
-			advertise();
-		}
-		if (on && link != NULL) {
-			int64_t left = rssi_at_ms + RSSI_EVERY_MS - k_uptime_get();
-
-			if (left <= 0) {
-				read_rssi();
-				continue;
-			}
-			wait = K_MSEC(left);
-		}
-		k_sem_take(&wake, wait);
+	if (conn == NULL) {
+		return;
 	}
+	if (bt_conn_get_security(conn) < SECURE) {
+		LOG_WRN("not secured in time: dropping the link");
+		bt_conn_disconnect(conn, BT_HCI_ERR_AUTH_FAIL);
+	}
+	bt_conn_unref(conn);
 }
-K_THREAD_DEFINE(bluetooth_tid, 4096, bluetooth_thread, NULL, NULL, NULL, 7, 0, 3000);
 
-/* radio [on|off|restart] */
+static int bluetooth_init(void)
+{
+	static const struct k_work_queue_config config = {.name = "bluetooth"};
+
+	k_work_queue_start(&queue, queue_stack, K_THREAD_STACK_SIZEOF(queue_stack), 7, &config);
+	k_work_schedule_for_queue(&queue, &apply_work, START_AFTER);
+	return 0;
+}
+SYS_INIT(bluetooth_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
+
+/* radio [on|off|restart|forget] */
 static int cmd_radio(const struct shell *sh, size_t argc, char **argv)
 {
 	static const char *const names[] = {"off", "starting", "advertising", "connected",
@@ -559,14 +817,19 @@ static int cmd_radio(const struct shell *sh, size_t argc, char **argv)
 	struct bluetooth_status s;
 
 	if (argc > 1 && strcmp(argv[1], "restart") == 0) {
-		ask(DO_RESTART);
+		atomic_set(&restart_wanted, 1);
+		k_work_reschedule_for_queue(&queue, &apply_work, K_NO_WAIT);
+	} else if (argc > 1 && strcmp(argv[1], "forget") == 0) {
+		bluetooth_forget();
 	} else if (argc > 1) {
 		bluetooth_set(strcmp(argv[1], "on") == 0);
 	}
 	bluetooth_status(&s);
-	shell_print(sh, "%s (set %s), own %s, peer %s%s", names[s.state],
+	shell_print(sh, "%s (set %s), own %s, peer %s%s%s, %u paired", names[s.state],
 		    bluetooth_is_set() ? "on" : "off", s.own[0] ? s.own : "-",
-		    s.peer[0] ? s.peer : "none", s.listening ? ", serial line open" : "");
+		    s.peer[0] ? s.peer : "none",
+		    s.state != BLUETOOTH_CONNECTED ? "" : s.secure ? ", secure" : ", not secure",
+		    s.listening ? ", serial line open" : "", s.bonds);
 	shell_print(sh,
 		    "interval %u ms, latency %u, mtu %u, connected %u s, %u connects, "
 		    "%u started over, rx %u tx %u bytes, rssi %d dBm (status %d)",
@@ -575,5 +838,6 @@ static int cmd_radio(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 SHELL_CMD_ARG_REGISTER(radio, NULL,
-		       "Bluetooth state; turn it on or off, or start it over: radio [on|off|restart]",
+		       "Bluetooth state; turn it on or off, start it over, or forget the "
+		       "phones paired: radio [on|off|restart|forget]",
 		       cmd_radio, 1, 1);

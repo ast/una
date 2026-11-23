@@ -206,8 +206,7 @@ stays as the updater's way to the chip. What it took besides: a malloc arena
 for the host's cryptography (PSA), random numbers from the chip
 (`BT_HOST_CRYPTO_PRNG=n`), no flow control from controller to host, as many
 ACL buffers as the chip has (7). With it the original phase 5 is open again:
-pairing with bonds in settings (it will want the SoC's random number
-generator), standard services, mcumgr over Bluetooth.
+standard services, mcumgr over Bluetooth.
 
 Seen with it: at every connection the log has "opcode 0x2016 status 0x3a",
 the chip being busy when the host asks for the phone's features; nothing
@@ -218,6 +217,41 @@ or the phone, and not the stack. Latency 4 with a 6 s timeout may be too
 tight; not looked into yet. The link that stayed up and carried nothing,
 seen several times under the chip's stack, has not been seen yet; the probe
 for it went with the old code.
+
+Pairing, 23 Nov: the serial line takes an authenticated link (LE Secure
+Connections, the passkey shown on the watch, bonds in settings, the SoC's
+random number generator for the keys), and `src/bluetooth.c` is a set of
+callbacks and work items on a queue of its own in place of a thread with
+flags. Tried against Linux (BlueZ) from start to end, and against Android
+with Gadgetbridge. What it took, each found the hard way:
+
+- The chip's enhanced connection complete event has an unresolved peer's
+  address in the field for a resolved one's and FF:FF:FF:FF:FF:FF where it
+  belongs. The host unmasks that event only with pairing built in, so it
+  showed only now; pairing computes with the address and failed. Put right
+  between driver and host (`chip_recv()`).
+- Android would not tell Gadgetbridge of a link it had: encrypted, the
+  database hash read, then silence, and service UUIDs of all zeros in
+  Gadgetbridge. It went away with the hash gone (`BT_GATT_CACHING=n`), the
+  watch forgotten on the phone and paired again; which of them it was is
+  not known, as they were done together.
+- The watch no longer asks for security when a phone connects, and asks for
+  the slow pace only once the line has been open for 15 s, so that neither
+  falls into pairing or the phone's look at the services.
+- The stack's receiving thread wants more than its 1200 bytes with pairing.
+
+Battery and device information services were in for an evening and are out
+again, to have less that differs while the above was looked for; nothing
+says they did harm.
+
+Still open, and worse than thought: the link is lost with reason 0x08 every
+few minutes, at -30 to -40 dBm. It happens at the watch's slow pace (180 ms,
+latency 4) and at the phone's own (30 ms, latency 5), once 14 s after
+pairing; a link to a laptop at 195 ms and latency 4 held for the minutes it
+was tried. What the cases share is that intervals may be skipped, so the
+chip's sleep between them is suspected: its board settings are blank and it
+goes by the firmware's defaults for the low-speed clock and the crystal's
+start-up time. Next: a pace without latency, to see whether the losses stop.
 
 Barometer (v0.5.0): the MS5837-02BA is driven by the app (`src/baro.c`,
 `src/baro_hw.c`), not by Zephyr's driver, which reads the calibration at

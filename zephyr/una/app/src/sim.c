@@ -17,6 +17,7 @@
 #include "bluetooth.h"
 #include "compass.h"
 #include "motion.h"
+#include "pairing.h"
 #include "phone.h"
 #include "power.h"
 #include "storage.h"
@@ -319,13 +320,24 @@ bool bluetooth_is_set(void)
 	return radio_on;
 }
 
+static uint8_t phones_paired = 1;
+
+void bluetooth_forget(void)
+{
+	phones_paired = 0;
+	phone_there = false;
+	ui_refresh();
+}
+
 void bluetooth_status(struct bluetooth_status *status)
 {
 	*status = (struct bluetooth_status){
 		.state = !radio_on     ? BLUETOOTH_OFF
 			 : phone_there ? BLUETOOTH_CONNECTED
 				       : BLUETOOTH_ADVERTISING,
+		.secure = phone_there,
 		.listening = phone_there,
+		.bonds = phones_paired,
 		.own = "C0:FF:EE:00:00:01",
 		.interval_ms = 200,
 		.latency = 4,
@@ -344,6 +356,22 @@ bool bluetooth_send(const void *data, size_t len)
 	phone_tx_bytes += len;
 	LOG_INF("to the phone: %.*s", (int)len, (const char *)data);
 	return true;
+}
+
+/* sim pair <passkey> | off: the screen a phone that pairs brings up */
+static void pair_cancelled(void)
+{
+	LOG_INF("pairing cancelled at the watch");
+}
+
+static int cmd_pair(const struct shell *sh, size_t argc, char **argv)
+{
+	if (strcmp(argv[1], "off") == 0) {
+		pairing_hide();
+	} else {
+		pairing_show(strtoul(argv[1], NULL, 10), pair_cancelled);
+	}
+	return 0;
 }
 
 /* sim phone on | off | <a line it sends, in hex> */
@@ -381,6 +409,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sim_cmds,
 	SHELL_CMD_ARG(gps, NULL, "off | <latitude> <longitude> [altitude m]", cmd_gps, 2, 2),
 	SHELL_CMD_ARG(move, NULL, "<km/h> <heading> [climb m/min]: move from where gps put it",
 		      cmd_move, 3, 1),
+	SHELL_CMD_ARG(pair, NULL, "<passkey> | off: the pairing screen", cmd_pair, 2, 0),
 	SHELL_CMD_ARG(phone, NULL, "on | off | <a line the phone sends, in hex>", cmd_phone, 2, 0),
 	SHELL_CMD(state, NULL, "What the UI has asked of the hardware", cmd_state),
 	SHELL_CMD_ARG(steps, NULL, "<count>: so many more steps are walked", cmd_steps, 2, 0),

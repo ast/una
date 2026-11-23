@@ -21,6 +21,7 @@ target_sources(app PRIVATE
   src/main.c
   src/messages.c
   src/motion.c
+  src/pairing.c
   src/phone.c
   src/record.c
   src/record_page.c

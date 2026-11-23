@@ -409,6 +409,11 @@ zephyr_udc0: &usbotg_hs {
 	status = "okay";
 };
 
+/* Random numbers, for the keys Bluetooth pairing makes. */
+&rng {
+	status = "okay";
+};
+
 &lptim4 {
 	clocks = <&rcc STM32_CLOCK(APB3, 13)>,
 		 <&rcc STM32_SRC_LSE LPTIM34_SEL(3)>;

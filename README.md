@@ -96,7 +96,7 @@ each of them.
 | Buzzer | works | timer, alarm, calls | |
 | Vibration motor, DRV2625 | works | nudges and ringing, open loop (`src/alert_hw.c`) | its calibrated closed-loop mode |
 | GPS, Airoha AG3335M | works | own driver (`zephyr/una/drivers/gnss`): fix in about a minute, position, speed, satellites | assisted start (EPO), a whole track checked outdoors, the count of satellites heard is too low |
-| Bluetooth, ST BlueNRG-2N | works | Zephyr's stack, the chip as a plain controller (needs ST's firmware 3.4.0 in it): one serial service, Gadgetbridge | pairing; see Phone |
+| Bluetooth, ST BlueNRG-2N | works | Zephyr's stack, the chip as a plain controller (needs ST's firmware 3.4.0 in it): one serial service for a paired phone, Gadgetbridge | a link that is often lost; see Phone |
 | USB-C controller, STUSB4500 | not driven | charges at its defaults | reading what the cable offers |
 | Barometer, MS5837-02BA | works | on while recording, read once a second (`src/baro_hw.c`): climb, and altitude in the file | floors; what it costs in current is not measured |
 | Accelerometer and gyro, BMI270 | works, not yet tried on a wrist | own driver (`zephyr/una/drivers/sensor/bmi270`, made of Zephyr's): the chip's step counter and activity, read once a minute; a turn of the wrist lights the screen (`src/motion_hw.c`) | steps and wrist turn checked on a wrist; steps kept over a restart, shown on a page and stored per day; cadence; what it costs in current |
@@ -294,17 +294,47 @@ Bluetooth is Zephyr's own stack on the SoC, with the radio chip
 (BlueNRG-2N) as a plain controller over SPI (`st,hci-spi-v2` with
 `req-ll-only` in the board's devicetree). The chip does that properly only
 from ST's firmware 3.4.0 on, which has to be loaded into it once: see the
-next section. `src/bluetooth.c` starts the stack, keeps the watch
-advertising, once a second, and offers the one service (Zephyr's
-`CONFIG_BT_ZEPHYR_NUS`); `src/phone.c` reads and writes the lines. Fifteen
-seconds into a connection the watch asks the phone for a slow pace (100 to
-200 ms, four in five skipped), which is what the battery pays for all day.
-The watch goes by an address of its own, not the chip's, so that the stock
-firmware's phone app does not take it for its watch. Bluetooth is turned off
-in Settings, which holds the chip in reset; `una-z sh radio` shows the
-state, as does the BLE system page, and `una-z sh radio restart` starts the
-radio over. The log says what the stack does, and at start which firmware
-the chip has.
+section after the next. `src/bluetooth.c` starts the stack, keeps the watch
+advertising, once a second, and offers the one service (the Nordic UART
+service, after Zephyr's `CONFIG_BT_ZEPHYR_NUS`); `src/phone.c` reads and
+writes the lines. Fifteen seconds after the phone has opened the line the
+watch asks it for a slow pace (100 to 200 ms, four in five skipped), which
+is what the battery pays for all day. The watch goes by an address of its
+own, not the chip's, so that the stock firmware's phone app does not take it
+for its watch. Bluetooth is turned off in Settings, which holds the chip in
+reset; `una-z sh radio` shows the state, as does the BLE system page, and
+`una-z sh radio restart` starts the radio over. The log says what the stack
+does, and at start which firmware the chip has.
+
+### Pairing
+
+The serial line is only for a phone that has paired. The first time a phone
+reaches for it (in Gadgetbridge: connect) the watch shows six digits and
+Android asks for them; typed in, the two are bonded and the link is
+encrypted from then on, without asking again. Any button on the watch gives
+the pairing up. A phone that has not got that far within a minute of
+connecting is dropped.
+
+It is LE Secure Connections with passkey entry and nothing weaker
+(`CONFIG_BT_SMP_SC_PAIR_ONLY`), the keys made of the SoC's random number
+generator. Up to four phones are remembered, in the settings in the SoC's
+flash; a fifth takes the place of the oldest. "Hold: unpair" in Settings
+forgets them all, as does `una-z sh radio forget`; `una-z sh radio` says how
+many there are and whether the link is secure. When one side has forgotten
+the other, forget on both ("Forget" under Bluetooth in Android's settings)
+and pair again.
+
+Three things are as they are for Android's sake. The watch does not ask for
+security itself when a phone connects, but leaves it to the phone: a bonded
+one encrypts at once, one that is not gets "insufficient authentication"
+for the serial line and pairs. The watch offers no database hash
+(`CONFIG_BT_GATT_CACHING=n`): with it, Android was seen to hold on to a
+wrong table of the watch's services, Gadgetbridge showing service UUIDs of
+all zeros and waiting for ever to reconnect, and forgetting the watch did
+not clear it. And the chip's report of a new connection is put right on its
+way to the stack (`chip_recv()` in `src/bluetooth.c`): for a phone it does
+not know it has the phone's address in the wrong field and all ones in the
+right one, on which pairing fails.
 
 ### The radio chip's firmware
 
@@ -372,9 +402,9 @@ The stock firmware finds stack 2.1f in the chip afterwards. The watch's
 earlier firmware for the chip's own stack (`src/bluenrg.c` with ST's ACI
 commands, as it was before) was seen to work on 3.4.0 too.
 
-Not done yet: pairing. Any phone in range can connect and send the watch a
-time or a message; nothing can be read from it but version and battery. Text
-from the phone is shown in fonts that have Latin-1 besides ASCII (made by
+Not right yet: the link is often lost (the log says "disconnected: 0x08",
+a timeout) and made again within seconds, most often while the phone may
+skip intervals; see `docs/zephyr-plan.md`. Text from the phone is shown in fonts that have Latin-1 besides ASCII (made by
 `scripts/una-fonts`); a character beyond that is a question mark.
 
 ## Watch faces

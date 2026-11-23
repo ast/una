@@ -7,12 +7,16 @@
 
 /*
  * The radio: on or off as set, advertising until the phone connects, and a
- * serial line to the phone (the Nordic UART service) once it has.
+ * serial line to the phone (the Nordic UART service) once it has and has
+ * shown itself to be paired. A phone pairs by the passkey the watch shows.
  */
 
 /* Stored. Returns at once; the radio follows within a few seconds. */
 void bluetooth_set(bool on);
 bool bluetooth_is_set(void);
+
+/* Forget every phone paired. Returns at once. */
+void bluetooth_forget(void);
 
 enum bluetooth_state {
 	BLUETOOTH_OFF,       /* chip held in reset */
@@ -24,7 +28,9 @@ enum bluetooth_state {
 
 struct bluetooth_status {
 	enum bluetooth_state state;
+	bool secure;          /* the link is encrypted with a paired phone's key */
 	bool listening;       /* the phone has opened the serial line */
+	uint8_t bonds;        /* phones paired */
 	char peer[18];        /* its address, "" when not connected */
 	char own[18];
 	uint16_t interval_ms; /* connection interval */
