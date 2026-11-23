@@ -395,9 +395,15 @@ has 3.4.0 (`bnrg update again` writes it anyway), and wants the battery at
 processor (X-CUBE-BLE2, `IFRStack_Updater`).
 
 The board's settings in the chip (crystal, low-speed clock, power supply)
-are in the last sector of its flash, which is read and printed and never
-written. On the watch they are blank, before and after: the chip goes by the
-firmware's defaults. The lines of `bnrg read` are an address and 32 bytes in
+are 14 bytes in the last sector of its flash (at 0x1007F900), which the
+update leaves alone. The watch came with them blank, so the chip went by the
+firmware's defaults, one of which does not fit the board: its switching
+regulator (SMPS) on, for an inductor of 10 uH the board does not have.
+`una-z sh bnrg smps off` sets the one byte that turns it off (`bnrg smps on`
+puts back the blank): the sector is read whole, erased, written with the byte
+changed and read again. Keep what `una-z sh bnrg read 1007f800 800` prints
+first: the sector also holds data of the chip's own in its first 64 bytes.
+The lines of `bnrg read` are an address and 32 bytes in
 hex; written back in the same way they would restore the old image, though
 nothing here does that yet.
 

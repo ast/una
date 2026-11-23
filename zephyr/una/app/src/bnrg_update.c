@@ -9,7 +9,9 @@
  *
  * As ST's own does it: x-cube-ble2, IFRStack_Updater/Src/bluenrg_2_utils.c.
  * The sector that holds the board's settings (crystal, low-speed clock, power
- * supply) is read and shown, never written.
+ * supply) is left alone by the update. "bnrg smps" writes one byte of it:
+ * whether the chip is to run its switching regulator, which a board without
+ * the inductor for it, as the watch's is, should have off.
  */
 
 #include <stdlib.h>
@@ -50,6 +52,10 @@ static const uint8_t image[] = {
 /* The board's settings, in the last sector. */
 #define DEV_CONFIG   (CHIP_FLASH_END - SECTOR + 0x100)
 #define DEV_CONFIG_N 14
+/* Of them, the third: 0xff the regulator with 10 uH, 0x00 with 4.7 uH, 0x01 off. */
+#define DEV_CONFIG_SMPS 2
+#define SMPS_10UH       0xff
+#define SMPS_OFF        0x01
 
 #define MIN_BATTERY 30
 
@@ -357,9 +363,97 @@ out:
 	return ok ? 0 : -EIO;
 }
 
+/*
+ * bnrg smps on|off: the settings sector read whole, the one byte changed,
+ * the sector erased, written and read again. "on" is the byte as it is in a
+ * chip nobody has set up (10 uH), which is how the watch came.
+ */
+static int cmd_smps(const struct shell *sh, size_t argc, char **argv)
+{
+	static uint8_t sector[SECTOR], check[SECTOR];
+	const uint32_t base = CHIP_FLASH_END - SECTOR;
+	const size_t at = DEV_CONFIG - base + DEV_CONFIG_SMPS;
+	uint8_t params[6 + BLOCK], value, reason;
+	struct power_status power;
+	bool ok = false;
+	int ret = 0;
+
+	if (strcmp(argv[1], "off") == 0) {
+		value = SMPS_OFF;
+	} else if (strcmp(argv[1], "on") == 0) {
+		value = SMPS_10UH;
+	} else {
+		shell_error(sh, "bnrg smps on|off");
+		return -EINVAL;
+	}
+	power_last(&power);
+	if (!power.usb_power && power.percent < MIN_BATTERY) {
+		shell_error(sh, "battery at %d%%: charge it first", power.percent);
+		return -EAGAIN;
+	}
+	if (!enter_updater(sh)) {
+		goto out;
+	}
+	for (size_t i = 0; ret == 0 && i < SECTOR; i += BLOCK) {
+		sys_put_le32(base + i, &params[0]);
+		sys_put_le16(BLOCK, &params[4]);
+		ret = cmd(READ_BLOCK, params, 6, &sector[i], BLOCK);
+	}
+	if (ret != 0) {
+		shell_error(sh, "the settings could not be read; nothing is changed");
+		goto out;
+	}
+	shell_print(sh, "the byte is 0x%02x", sector[at]);
+	if (sector[at] == value) {
+		shell_print(sh, "nothing to do");
+		ok = true;
+		goto out;
+	}
+	sector[at] = value;
+	sys_put_le32(base, params);
+	ret = cmd(ERASE_SECTOR, params, 4, NULL, 0);
+	for (size_t i = 0; ret == 0 && i < SECTOR; i += BLOCK) {
+		bool blank = true;
+
+		for (size_t j = 0; j < BLOCK; j++) {
+			blank = blank && sector[i + j] == 0xff;
+		}
+		if (blank) {
+			continue;
+		}
+		sys_put_le32(base + i, &params[0]);
+		sys_put_le16(BLOCK, &params[4]);
+		memcpy(&params[6], &sector[i], BLOCK);
+		ret = cmd(PROGRAM_BLOCK, params, sizeof(params), NULL, 0);
+	}
+	for (size_t i = 0; ret == 0 && i < SECTOR; i += BLOCK) {
+		sys_put_le32(base + i, &params[0]);
+		sys_put_le16(BLOCK, &params[4]);
+		ret = cmd(READ_BLOCK, params, 6, &check[i], BLOCK);
+	}
+	if (ret != 0 || memcmp(sector, check, SECTOR) != 0) {
+		shell_error(sh, "the settings are not as they were meant to be (%d): run it again",
+			    ret);
+		goto out;
+	}
+	shell_print(sh, "written: the byte is 0x%02x", check[at]);
+	bluenrg_stop();
+	reason = start(sh);
+	if (reason != STARTED_STACK) {
+		shell_error(sh, "the chip started as %u, not as the stack", reason);
+		goto out;
+	}
+	ok = show_firmware(sh, NULL);
+out:
+	bluenrg_stop();
+	return ok ? 0 : -EIO;
+}
+
 SHELL_STATIC_SUBCMD_SET_CREATE(bnrg_cmds,
 	SHELL_CMD(info, NULL, "the chip's firmware and the board's settings in it", cmd_info),
 	SHELL_CMD_ARG(read, NULL, "<address> <bytes>, in hex: the chip's flash", cmd_read, 3, 0),
 	SHELL_CMD_ARG(update, NULL, "[again]: write ST's image into the chip", cmd_update, 1, 1),
+	SHELL_CMD_ARG(smps, NULL, "on|off: the chip's switching regulator, in its settings",
+		      cmd_smps, 2, 0),
 	SHELL_SUBCMD_SET_END);
 SHELL_CMD_REGISTER(bnrg, &bnrg_cmds, "The radio chip's firmware", NULL);

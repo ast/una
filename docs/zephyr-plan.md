@@ -269,9 +269,14 @@ Looked at again the morning after (23 Nov), with the phone left paired:
   (UNAlink_BLUENRG2 rev 1.4) has no 32 kHz crystal, which fits the default
   (ring oscillator), and no SMPS inductor: SMPSFILT1 open, SMPSFILT2 on
   1V8. ST asks for SMPS_IND_OFF then; the blank settings mean SMPS on with
-  10 uH. It is so with the stock firmware too. Writing the settings sector
-  (through the updater, as `bnrg update` writes the image) would set it
-  right; not done, and not known to matter.
+  10 uH. It is so with the stock firmware too. Set right the same day with
+  `bnrg smps off` (the third of the 14 bytes at 0x1007F900, 0xFF to 0x01,
+  the sector read, erased, written and compared: nothing else differs). The
+  sector is not all blank: its first 64 bytes hold data of the chip's own,
+  kept, and kept in a file beside the image's backup. The chip starts and
+  the phone connects as before. That the regulator was running, or that
+  having it off changes anything, is not shown: neither current nor losses
+  were measured against it.
 - The stock firmware never asks for latency: it prefers 7.5 to 75 ms and
   leaves the rest to the phone.
 
