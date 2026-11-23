@@ -328,10 +328,13 @@ Three things are as they are for Android's sake. The watch does not ask for
 security itself when a phone connects, but leaves it to the phone: a bonded
 one encrypts at once, one that is not gets "insufficient authentication"
 for the serial line and pairs. The watch offers no database hash
-(`CONFIG_BT_GATT_CACHING=n`): with it, Android was seen to hold on to a
-wrong table of the watch's services, Gadgetbridge showing service UUIDs of
-all zeros and waiting for ever to reconnect, and forgetting the watch did
-not clear it. And the chip's report of a new connection is put right on its
+(`CONFIG_BT_GATT_CACHING=n`): with it, Android connects, encrypts and then
+asks nothing more, and Gadgetbridge waits for ever to reconnect (tried both
+ways with one phone and one bond: stuck with the hash, well without). The
+price is that a paired phone is not told when the watch's services change.
+So the serial service keeps its place whatever is added, and a phone finds
+what was added after it paired only by pairing anew.
+And the chip's report of a new connection is put right on its
 way to the stack (`chip_recv()` in `src/bluetooth.c`): for a phone it does
 not know it has the phone's address in the wrong field and all ones in the
 right one, on which pairing fails.
@@ -402,9 +405,17 @@ The stock firmware finds stack 2.1f in the chip afterwards. The watch's
 earlier firmware for the chip's own stack (`src/bluenrg.c` with ST's ACI
 commands, as it was before) was seen to work on 3.4.0 too.
 
-Not right yet: the link is often lost (the log says "disconnected: 0x08",
-a timeout) and made again within seconds, most often while the phone may
-skip intervals; see `docs/zephyr-plan.md`. Text from the phone is shown in fonts that have Latin-1 besides ASCII (made by
+The link was often lost on the evening pairing was made ("disconnected:
+0x08" in the log, a timeout; made again within seconds), and not once the
+morning after in an hour of trying to provoke it; see `docs/zephyr-plan.md`.
+`una-z sh radio` counts such losses, and `una-z sh radio pace MIN MAX LATENCY
+TIMEOUT` (milliseconds, but for the latency) asks the phone for another
+pace, for trying things.
+
+Besides the serial line the watch has the standard battery and device
+information services, open to any app.
+
+Text from the phone is shown in fonts that have Latin-1 besides ASCII (made by
 `scripts/una-fonts`); a character beyond that is a question mark.
 
 ## Watch faces

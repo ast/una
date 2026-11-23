@@ -240,18 +240,40 @@ with Gadgetbridge. What it took, each found the hard way:
   falls into pairing or the phone's look at the services.
 - The stack's receiving thread wants more than its 1200 bytes with pairing.
 
-Battery and device information services were in for an evening and are out
-again, to have less that differs while the above was looked for; nothing
-says they did harm.
+Looked at again the morning after (23 Nov), with the phone left paired:
 
-Still open, and worse than thought: the link is lost with reason 0x08 every
-few minutes, at -30 to -40 dBm. It happens at the watch's slow pace (180 ms,
-latency 4) and at the phone's own (30 ms, latency 5), once 14 s after
-pairing; a link to a laptop at 195 ms and latency 4 held for the minutes it
-was tried. What the cases share is that intervals may be skipped, so the
-chip's sleep between them is suspected: its board settings are blank and it
-goes by the firmware's defaults for the low-speed clock and the crystal's
-start-up time. Next: a pace without latency, to see whether the losses stop.
+- The database hash is what stops Android. With `BT_GATT_CACHING=y` and
+  nothing else changed the phone connects, encrypts, and asks nothing for
+  minutes; without it, the same bond opens the line in seconds. Zephyr
+  answers a phone it takes to be unaware of a change with "database out of
+  sync" once and with silence after (`att.c`), until the phone has read the
+  hash; this phone does not get there. So it stays off, and the serial
+  service has a name that sorts it before any other of the application's
+  (`_3_serial_service`): its handles are what a paired phone remembers, and
+  nothing tells the phone of a change.
+- Battery and device information services are back, after the serial
+  service. The phone opens the line as before; they have not been read by
+  anything yet.
+- The 0x08 losses did not come back. 21 min idle at 180 ms and latency 4,
+  7 min at latency 0, 24 changes of pace between 30-50 and 100-200 ms
+  without latency and 24 with latency 4, 8 s apart: not one loss, at -20 to
+  -40 dBm, with the firmware of the evening before. Of that evening's six,
+  two came at the moment of a change of pace and two some 110 s after one;
+  ST's notes for stack 2.1f have "unexpected disconnection after several
+  connection update procedures" (ID 6965) and "slave latency not applied
+  during LL connection parameter update" (ID 3508). What differed that
+  evening: pairing done over and over, a laptop scanning and connecting
+  beside it, the phone in the hand. Not explained. `radio` counts the
+  losses now and `radio pace` asks for a pace by hand.
+- The chip's board settings do not fit the board. The schematic
+  (UNAlink_BLUENRG2 rev 1.4) has no 32 kHz crystal, which fits the default
+  (ring oscillator), and no SMPS inductor: SMPSFILT1 open, SMPSFILT2 on
+  1V8. ST asks for SMPS_IND_OFF then; the blank settings mean SMPS on with
+  10 uH. It is so with the stock firmware too. Writing the settings sector
+  (through the updater, as `bnrg update` writes the image) would set it
+  right; not done, and not known to matter.
+- The stock firmware never asks for latency: it prefers 7.5 to 75 ms and
+  leaves the rest to the phone.
 
 Barometer (v0.5.0): the MS5837-02BA is driven by the app (`src/baro.c`,
 `src/baro_hw.c`), not by Zephyr's driver, which reads the calibration at

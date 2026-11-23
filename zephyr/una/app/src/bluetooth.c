@@ -18,6 +18,7 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <zephyr/bluetooth/bluetooth.h>
@@ -75,7 +76,13 @@ LOG_MODULE_REGISTER(bluetooth, LOG_LEVEL_INF);
 /*
  * The serial service, as Zephyr's own instance of it but for the permissions:
  * to listen and to write takes an authenticated link.
+ *
+ * Services are laid out in the order of their names, and a phone that has
+ * paired remembers where it found things. Nothing tells it of a change (see
+ * CONFIG_BT_GATT_CACHING in boards/una_watch.conf), so this one has a name
+ * that keeps it first after the stack's own two, wherever others are added.
  */
+#define nus_service _3_serial_service
 BT_GATT_SERVICE_DEFINE(nus_service,
 	BT_GATT_PRIMARY_SERVICE(BT_UUID_NUS_SERVICE),
 	BT_GATT_CHARACTERISTIC(BT_UUID_NUS_TX_CHAR, BT_GATT_CHRC_NOTIFY, BT_GATT_PERM_NONE, NULL,
@@ -144,7 +151,7 @@ static uint8_t security;
 static uint16_t interval_ms, latency, mtu;
 static bt_addr_le_t peer, own;
 static int64_t connected_at_ms;
-static uint32_t connects, resets, rx_bytes, tx_bytes;
+static uint32_t connects, timeouts, resets, rx_bytes, tx_bytes;
 static int rssi_status;
 static int8_t rssi;
 
@@ -183,6 +190,7 @@ void bluetooth_status(struct bluetooth_status *status)
 		status->state = state;
 		status->listening = listening;
 		status->connects = connects;
+		status->timeouts = timeouts;
 		status->resets = resets;
 		status->rx_bytes = rx_bytes;
 		status->tx_bytes = tx_bytes;
@@ -283,18 +291,17 @@ static void on_connected(struct bt_conn *conn, uint8_t err)
 		LOG_WRN("a connection failed: 0x%02x %s", err, bt_hci_err_to_str(err));
 		return;
 	}
+	if (bt_conn_get_info(conn, &info) != 0) {
+		memset(&info, 0, sizeof(info));
+	}
 	K_SPINLOCK(&lock) {
 		link = bt_conn_ref(conn);
 		listening = false;
-		security = bt_conn_get_security(conn);
+		security = info.security.level;
 		peer = *bt_conn_get_dst(conn);
-		mtu = bt_gatt_get_mtu(conn);
-		interval_ms = 0;
-		latency = 0;
-		if (bt_conn_get_info(conn, &info) == 0) {
-			interval_ms = info.le.interval_us / 1000;
-			latency = info.le.latency;
-		}
+		mtu = 23; /* until the phone asks for more */
+		interval_ms = info.le.interval_us / 1000;
+		latency = info.le.latency;
 		connected_at_ms = k_uptime_get();
 		rssi = 0;
 		rssi_status = 0;
@@ -325,6 +332,9 @@ static void on_disconnected(struct bt_conn *conn, uint8_t reason)
 			listening = false;
 			security = 0;
 			state = BLUETOOTH_STARTING;
+			if (reason == BT_HCI_ERR_CONN_TIMEOUT) {
+				timeouts++;
+			}
 		}
 	}
 	if (was == NULL) {
@@ -385,8 +395,10 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 
 static void on_mtu(struct bt_conn *conn, uint16_t tx, uint16_t rx)
 {
+	uint16_t now = bt_gatt_get_mtu(conn);
+
 	K_SPINLOCK(&lock) {
-		mtu = bt_gatt_get_mtu(conn);
+		mtu = now;
 	}
 }
 
@@ -809,7 +821,7 @@ static int bluetooth_init(void)
 }
 SYS_INIT(bluetooth_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
 
-/* radio [on|off|restart|forget] */
+/* radio [on|off|restart|forget|pace MIN_MS MAX_MS LATENCY TIMEOUT_MS] */
 static int cmd_radio(const struct shell *sh, size_t argc, char **argv)
 {
 	static const char *const names[] = {"off", "starting", "advertising", "connected",
@@ -821,8 +833,23 @@ static int cmd_radio(const struct shell *sh, size_t argc, char **argv)
 		k_work_reschedule_for_queue(&queue, &apply_work, K_NO_WAIT);
 	} else if (argc > 1 && strcmp(argv[1], "forget") == 0) {
 		bluetooth_forget();
-	} else if (argc > 1) {
+	} else if (argc == 6 && strcmp(argv[1], "pace") == 0) {
+		/* For trying things: milliseconds, but for the latency. */
+		struct bt_conn *conn = link_ref();
+		int ret = -ENOTCONN;
+
+		if (conn != NULL) {
+			ret = bt_conn_le_param_update(
+				conn, BT_LE_CONN_PARAM(atoi(argv[2]) * 4 / 5, atoi(argv[3]) * 4 / 5,
+						       atoi(argv[4]), atoi(argv[5]) / 10));
+			bt_conn_unref(conn);
+		}
+		shell_print(sh, "asked: %d", ret);
+	} else if (argc == 2 && (strcmp(argv[1], "on") == 0 || strcmp(argv[1], "off") == 0)) {
 		bluetooth_set(strcmp(argv[1], "on") == 0);
+	} else if (argc > 1) {
+		shell_error(sh, "radio [on|off|restart|forget|pace MIN MAX LATENCY TIMEOUT]");
+		return -EINVAL;
 	}
 	bluetooth_status(&s);
 	shell_print(sh, "%s (set %s), own %s, peer %s%s%s, %u paired", names[s.state],
@@ -832,12 +859,13 @@ static int cmd_radio(const struct shell *sh, size_t argc, char **argv)
 		    s.listening ? ", serial line open" : "", s.bonds);
 	shell_print(sh,
 		    "interval %u ms, latency %u, mtu %u, connected %u s, %u connects, "
-		    "%u started over, rx %u tx %u bytes, rssi %d dBm (status %d)",
-		    s.interval_ms, s.latency, s.mtu, s.connected_s, s.connects, s.resets,
+		    "%u lost, %u started over, rx %u tx %u bytes, rssi %d dBm (status %d)",
+		    s.interval_ms, s.latency, s.mtu, s.connected_s, s.connects, s.timeouts, s.resets,
 		    s.rx_bytes, s.tx_bytes, s.rssi, s.rssi_status);
 	return 0;
 }
 SHELL_CMD_ARG_REGISTER(radio, NULL,
 		       "Bluetooth state; turn it on or off, start it over, or forget the "
-		       "phones paired: radio [on|off|restart|forget]",
-		       cmd_radio, 1, 1);
+		       "phones paired: radio [on|off|restart|forget|pace MIN MAX LATENCY "
+		       "TIMEOUT]",
+		       cmd_radio, 1, 5);

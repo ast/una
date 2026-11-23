@@ -30,7 +30,9 @@ struct bluetooth_status {
 	enum bluetooth_state state;
 	bool secure;          /* the link is encrypted with a paired phone's key */
 	bool listening;       /* the phone has opened the serial line */
-	uint8_t bonds;        /* phones paired */
+	uint8_t bonds;
+	/* Links lost because the phone was no longer heard (reason 0x08). */
+	uint32_t timeouts;        /* phones paired */
 	char peer[18];        /* its address, "" when not connected */
 	char own[18];
 	uint16_t interval_ms; /* connection interval */

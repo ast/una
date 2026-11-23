@@ -9,6 +9,7 @@
 
 #include <stdlib.h>
 
+#include <zephyr/bluetooth/services/bas.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/drivers/rtc.h>
@@ -289,6 +290,10 @@ static void telemetry(const struct power_status *st, int32_t mean_ua)
 	}
 	(void)rtc_get_time(rtc, &t);
 	phone_battery(st->percent, st->usb_power && st->microamps > 0, st->millivolts);
+#if defined(CONFIG_BT_BAS)
+	/* The same for whoever asks in the standard way. */
+	bt_bas_set_battery_level(st->percent);
+#endif
 
 	bluetooth_status(&bt);
 	phone_status(&phone);
