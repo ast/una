@@ -26,46 +26,60 @@ static const struct {
 static uint8_t sound = 1;
 static uint8_t vibration = 1;
 
-/* Steps of the pattern still to play; 0 ends it. */
-static atomic_t steps_left;
+/*
+ * A pattern is asked for from any thread and played by the work alone: the
+ * steps to play from the beginning, 0 to stop, -1 when nothing is asked.
+ * Cancelling the work instead would, if it is running just then, have the
+ * kernel refuse every schedule until it returns, its own for the next step
+ * among them, and whatever was on would stay on.
+ */
+static atomic_t asked = ATOMIC_INIT(-1);
+
+/* The work's own: steps still to play, the one that is next, and when. */
+static int steps_left;
 static int step;
+static int64_t step_at;
 
 static void play_step(struct k_work *work);
 static K_WORK_DELAYABLE_DEFINE(step_work, play_step);
 
 static void play_step(struct k_work *work)
 {
+	int fresh = atomic_set(&asked, -1);
+	int64_t now = k_uptime_get();
 	bool on;
 
-	ARG_UNUSED(work);
-
-	if (atomic_get(&steps_left) <= 0) {
+	if (fresh >= 0) {
+		steps_left = fresh;
+		step = 0;
+	} else if (steps_left > 0 && now < step_at) {
+		/* Woken for a pattern that an earlier run already took. */
+		k_work_schedule(&step_work, K_MSEC(step_at - now));
+		return;
+	}
+	if (steps_left <= 0) {
 		buzzer_set(false);
 		motor_set(false);
 		return;
 	}
-	atomic_dec(&steps_left);
+	steps_left--;
 	on = pattern[step].on;
 	buzzer_set(on && sound);
 	motor_set(on && vibration);
+	step_at = k_uptime_get() + pattern[step].ms;
 	k_work_schedule(&step_work, K_MSEC(pattern[step].ms));
 	step = (step + 1) % ARRAY_SIZE(pattern);
 }
 
 static void start(int steps)
 {
-	/* Stop first, so that the pattern starts from its beginning. */
-	atomic_set(&steps_left, 0);
-	k_work_cancel_delayable(&step_work);
-	step = 0;
-	atomic_set(&steps_left, steps);
-	k_work_schedule(&step_work, K_NO_WAIT);
+	atomic_set(&asked, steps);
+	k_work_reschedule(&step_work, K_NO_WAIT);
 }
 
 void alert_stop(void)
 {
-	atomic_set(&steps_left, 0);
-	k_work_reschedule(&step_work, K_NO_WAIT);
+	start(0);
 }
 
 void alert_blip(void)
