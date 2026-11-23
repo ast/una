@@ -24,6 +24,7 @@
 #include "baro.h"
 #include "clock.h"
 #include "gnss.h"
+#include "hr.h"
 #include "record.h"
 #include "storage.h"
 #include "ui.h"
@@ -269,6 +270,7 @@ static void start(void)
 	now.saved = ret == 0;
 	gnss_want(GNSS_FOR_RECORD, true);
 	baro_want(BARO_FOR_RECORD, true);
+	hr_want(HR_FOR_RECORD, true);
 	next_tick_ms = k_uptime_get() + 1000;
 }
 
@@ -276,6 +278,7 @@ static void finish(void)
 {
 	gnss_want(GNSS_FOR_RECORD, false);
 	baro_want(BARO_FOR_RECORD, false);
+	hr_want(HR_FOR_RECORD, false);
 	now.phase = RECORD_IDLE;
 	now.fix = false;
 	now.speed_mm_s = 0;
@@ -317,7 +320,8 @@ static void tick(void)
 	struct baro_reading air;
 	bool have_air = baro_read(&air);
 	uint32_t values[] = {fit_now(), FIT_NO_POSITION, FIT_NO_POSITION, FIT_NONE, FIT_NONE,
-			     FIT_NONE};
+			     FIT_NONE, FIT_NONE};
+	uint8_t bpm;
 	struct gnss_fix fix;
 	bool fresh = gnss_fix(&fix);
 	int64_t latitude = fix.latitude, longitude = fix.longitude, at_ms = fix.at_ms;
@@ -364,6 +368,9 @@ static void tick(void)
 					  : FIT_NONE;
 	}
 	values[3] = distance_cm;
+	if (hr_read(&bpm)) {
+		values[6] = bpm;
+	}
 	now.distance_m = distance_cm / 100;
 	now.ascent_m = ascent_mm / 1000;
 

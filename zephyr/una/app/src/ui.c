@@ -149,8 +149,8 @@ SETTINGS_STATIC_HANDLER_DEFINE(ui, "ui", NULL, ui_setting_set, NULL, NULL);
 
 /* The ring: DOWN from the face goes through it in this order, UP in the other. */
 static const struct ui_screen *const ring[] = {
-	&face_screen,      &record_screen, &messages_screen, &compass_screen, &stopwatch_screen,
-	&timer_screen,     &alarm_screen,  &settings_screen, &systems_screen,
+	&face_screen,      &record_screen, &messages_screen, &hr_screen,       &compass_screen,
+	&stopwatch_screen, &timer_screen,  &alarm_screen,    &settings_screen, &systems_screen,
 };
 #define RING_RECORD 1
 static int ring_pos;

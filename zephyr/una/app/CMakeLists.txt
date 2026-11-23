@@ -20,6 +20,7 @@ target_sources(app PRIVATE
   src/gnss.c
   src/hr.c
   src/hr_alg.c
+  src/hr_page.c
   src/main.c
   src/messages.c
   src/motion.c

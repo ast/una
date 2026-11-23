@@ -16,6 +16,10 @@
 #include <zephyr/sys/atomic.h>
 #include <zephyr/sys/util.h>
 
+#if defined(CONFIG_BT_HRS)
+#include <zephyr/bluetooth/services/hrs.h>
+#endif
+
 #include "clock.h"
 #include "hr.h"
 #include "hr_alg.h"
@@ -293,13 +297,36 @@ static void take(const struct hr_hw_batch *batch)
 	if (changed) {
 		ui_refresh();
 	}
+#if defined(CONFIG_BT_HRS)
+	if (bpm != 0 && hr_wanted(HR_FOR_PHONE)) {
+		(void)bt_hrs_notify(bpm);
+	}
+#endif
 }
+
+#if defined(CONFIG_BT_HRS)
+/*
+ * The standard service, for any app that reads a pulse: the sensor is on
+ * while one listens. The stack says "no more" too when the link is lost.
+ */
+static void on_listening(bool enabled)
+{
+	hr_want(HR_FOR_PHONE, enabled);
+}
+
+static struct bt_hrs_cb hrs_cb = {
+	.ntf_changed = on_listening,
+};
+#endif
 
 static void hr_thread(void *p1, void *p2, void *p3)
 {
 	static struct hr_hw_batch batch;
 	bool on = false;
 
+#if defined(CONFIG_BT_HRS)
+	(void)bt_hrs_cb_register(&hrs_cb);
+#endif
 	(void)hr_hw_power(false, false);
 	while (true) {
 		bool want = atomic_get(&wanted) != 0;

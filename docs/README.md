@@ -72,9 +72,11 @@ Status: ✔ present, – no public datasheet (see "Missing" below).
 
 **No public datasheet**
 
-- PixArt PAH8316LS and Airoha AG3335M: NDA only. The best reference is the kernel
-  driver source (`Hardware/PAH8316LS/`, `Hardware/AG3335/`) and
-  `refs/una-kernel-public/Software/ThirdParty/VendorLib/include/pixart/`.
+- PixArt PAH8316LS: NDA only, and its driver in the stock kernel is inside a
+  closed library. What its registers were seen to do is in
+  `sensors/pah8316-registers.md`.
+- Airoha AG3335M: NDA only. The best reference is the kernel driver source
+  (`Hardware/AG3335/`).
 - Murata crystal and SAW filters, Golledge TCXO, Semtech RClamp2261ZA: no direct
   PDF link found.
 

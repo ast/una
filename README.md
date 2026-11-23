@@ -101,10 +101,9 @@ each of them.
 | Barometer, MS5837-02BA | works | on while recording, read once a second (`src/baro_hw.c`): climb, and altitude in the file | floors; what it costs in current is not measured |
 | Accelerometer and gyro, BMI270 | works, not yet tried on a wrist | own driver (`zephyr/una/drivers/sensor/bmi270`, made of Zephyr's): the chip's step counter and activity, read once a minute; a turn of the wrist lights the screen (`src/motion_hw.c`) | steps and wrist turn checked on a wrist; steps kept over a restart, shown on a page and stored per day; cadence; what it costs in current |
 | Magnetometer, BMM350 | works, not yet calibrated or checked against north | own driver (`zephyr/una/drivers/sensor/bmm350`, made of Zephyr's), on while the compass page is shown (`src/compass_hw.c`): heading with the tilt taken out by the accelerometer, calibration by turning the watch | calibration and heading tried on the watch; true north (declination); its interrupt, PC2, is not used |
-| Heart rate, PixArt PAH8316 | not driven | | PixArt's algorithm is a closed library in the stock source; an open driver would be new work; I2C2 0x40, supplies on PF13 and PG10 |
+| Heart rate, PixArt PAH8316 | works at rest, not yet tried walking or running | own driver (`zephyr/una/drivers/sensor/pah8316`), written from what PixArt's library was seen to do on the bus (`docs/sensors/pah8316-registers.md`) and with nothing of it; a pulse of our own making (`src/hr_alg.c`), within 2 a minute of PixArt's on average at rest; on while its page is shown, while recording (into the file) and while an app listens to the Bluetooth heart rate service | the pulse while walking and running, against a chest strap; what it costs in current; a pulse through the day; SpO2 and HRV, which the chip has settings for |
 
-The heart-rate sensor has its supplies held off; the USB-C controller has
-its own with the watch and is left as it starts.
+The USB-C controller has its supply with the watch and is left as it starts.
 
 What is left besides the parts, roughly in the order it would be missed:
 

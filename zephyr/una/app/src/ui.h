@@ -105,6 +105,7 @@ extern const struct ui_screen face_screen;
 extern const struct ui_screen face_chooser_screen;
 extern const struct ui_screen record_screen;
 extern const struct ui_screen compass_screen;
+extern const struct ui_screen hr_screen;
 extern const struct ui_screen messages_screen;
 extern const struct ui_screen message_screen;
 extern const struct ui_screen settings_screen;

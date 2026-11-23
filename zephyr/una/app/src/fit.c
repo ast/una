@@ -23,6 +23,7 @@
 
 /* Base types */
 #define T_ENUM   0x00
+#define T_UINT8  0x02
 #define T_UINT16 0x84
 #define T_SINT32 0x85
 #define T_UINT32 0x86
@@ -53,9 +54,9 @@ static const struct message messages[FIT_MESSAGE_COUNT] = {
 				{3, 4, T_UINT32Z}, {4, 4, T_UINT32}),
 	/* event (timer), event type */
 	[FIT_EVENT] = MESSAGE(21, TIMESTAMP, {0, 1, T_ENUM}, {1, 1, T_ENUM}),
-	/* latitude, longitude, distance, speed, altitude */
+	/* latitude, longitude, distance, speed, altitude, heart rate */
 	[FIT_RECORD] = MESSAGE(20, TIMESTAMP, {0, 4, T_SINT32}, {1, 4, T_SINT32}, {5, 4, T_UINT32},
-			       {73, 4, T_UINT32}, {78, 4, T_UINT32}),
+			       {73, 4, T_UINT32}, {78, 4, T_UINT32}, {3, 1, T_UINT8}),
 	/* event (lap), event type (stop), start, elapsed, timer, distance, trigger */
 	[FIT_LAP] = MESSAGE(19, INDEX, TIMESTAMP, {0, 1, T_ENUM}, {1, 1, T_ENUM}, {2, 4, T_UINT32},
 			    {7, 4, T_UINT32}, {8, 4, T_UINT32}, {9, 4, T_UINT32}, {24, 1, T_ENUM}),

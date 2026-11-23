@@ -19,8 +19,9 @@ built so that an LLM can develop and verify it over USB. Decisions taken:
 - **Apps:** built into the firmware behind one small app interface, shaped so
   they can later be loaded from eMMC as Zephyr extensions (LLEXT). Stock
   `.uapp` files are not supported.
-- **Heart rate:** link PixArt's closed library from the local kernel clone at
-  build time (never copied into this repo); an open driver may follow.
+- **Heart rate:** an open driver and a pulse algorithm of our own. PixArt's
+  closed library is linked only into a build for comparing with it
+  (`hr-ref.conf`), from the local kernel clone, never copied into this repo.
 - **Priorities:** all four areas (notifications/media, GPS workouts, daily
   health, utilities), after the basics.
 
@@ -169,10 +170,13 @@ Still to be confirmed by a day of wear: the telemetry line carries `soc`,
   `Hardware/BMI270/BMI270.cpp` does). Lift-to-wake drives the backlight.
 - MS5837 and BMM350 through Zephyr's drivers; altitude, floors and compass
   ported from the stock kernel.
-- Heart rate: Kconfig option `UNA_PIXART_HR` that links
-  `refs/una-kernel-public/Software/ThirdParty/VendorLib/lib/libuna_vendor.a`
-  when present and publishes HR and worn state; off by default so a clean
-  clone builds. Check ABI (hard float, newlib symbols) as the first step.
+- Heart rate: done otherwise than planned here. The register driver turned
+  out to be inside PixArt's library too, so there was nothing open to put
+  under their algorithm. Instead the library was run on the watch with its
+  bus calls written down (`CONFIG_UNA_PIXART_REF`, `hr-ref.conf`, shell
+  `hrref`; it needs hard float and newlib, which only that build has), and
+  the driver in `drivers/sensor/pah8316` was written from the traces. See
+  `docs/sensors/pah8316-registers.md` and the status below.
 ### Status after v0.4.0 (22 Nov 2026)
 
 The GPS receiver gets a first fix in about a minute outdoors (the SoC has
@@ -417,3 +421,34 @@ Enable LLEXT, export the app C API and LVGL, load `.llext` files from
 - GPS: outdoor fix time with and without EPO; a recorded FIT file opens in a
   FIT viewer.
 - Regression: restore-to-stock is exercised once after phases 1 and 2.
+
+### Status of heart rate (23 Nov 2026)
+
+What was checked, on the watch:
+
+- PixArt's library, traced: product 0x8311, the setup, the interrupt and the
+  FIFO, 7.5 minutes on a wrist with 441 batches and no bus errors, its pulse
+  70 to 78 at rest.
+- Our driver: 13 minutes on a wrist, 781 batches, each a second after the
+  last, none lost, no bus errors, the chip never started again. The
+  barometer on the same bus reads meanwhile.
+- Our pulse (`src/hr_alg.c`, `scripts/hr-replay` over the recordings in
+  `logs/ppg/`): over the recording made with PixArt's library, 1.8 a minute
+  from the library's on average, 96 in 100 within 5. Over the recording with
+  our driver, with hands at a keyboard, 89 in 100 of its answers between 64
+  and 86, an answer in 627 of 781 s.
+- In the simulator: `sim hr 142` is found, the page shows it.
+
+Not checked, or not done:
+
+- No reference but PixArt's library, and that only at rest. No chest strap,
+  no manual count that was written down.
+- Walking and running. The handling of a paced movement is written and has
+  never met one; expect it to be wrong.
+- The Bluetooth heart rate service and the pulse in a FIT file are built and
+  not yet seen from a phone or in a file.
+- What the sensor draws, looking for skin and measuring.
+- A recording cut off by a firmware older than this cannot be finished by
+  this one: the record in the file is a byte longer now.
+- The 25 Hz settings (red and infrared for SpO2, one green for HRV) are in
+  PixArt's library and were not traced.
