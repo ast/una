@@ -384,6 +384,15 @@ most (the stock firmware fits an ellipsoid), the current it costs.
   protocol allows, otherwise later. EPO files are copied over USB until then.
 - Satellite status screen; GPS simulation through the zbus channel.
 
+**Open: current while recording (to be done later).** Measured at v0.5.0
+(24 Nov 2026): 26 to 30 mA while recording, some eight hours. Of the 26 mA,
+roughly 9 mA is the MCU being kept awake for the receiver's UART (`power
+awake 1500` on battery with the receiver off: 9 to 10 mA) and about 16 to
+17 mA is the receiver and the rest. Letting the MCU sleep between the
+receiver's once-a-second bursts would take recording from about 8 hours to
+about 13. That means waking from Stop on LPUART1, which the STM32U5 can do,
+but it is a real piece of work and is not started.
+
 ### 7. Utilities
 Alarm, timer, stopwatch, compass with calibration, sleep-mode schedule.
 
