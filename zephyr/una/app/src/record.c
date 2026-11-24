@@ -25,6 +25,7 @@
 #include "clock.h"
 #include "gnss.h"
 #include "hr.h"
+#include "motion.h"
 #include "record.h"
 #include "storage.h"
 #include "ui.h"
@@ -51,9 +52,21 @@ LOG_MODULE_REGISTER(record, LOG_LEVEL_INF);
 /*
  * The barometer's height is off by the weather. What it is off by is taken
  * from the receiver: the mean of the difference, over this many fixes once
- * there are that many.
+ * there are that many. The receiver's height wanders by tens of metres
+ * within minutes, and is furthest off in its first minute and when HDOP is
+ * poor: those fixes are left out, and the mean is a long one, or the height
+ * in the file would be the receiver's and not the barometer's.
  */
-#define SEA_FIXES 64
+#define SEA_FIXES       600
+#define SEA_SETTLE_S    60
+#define SEA_HDOP_TENTHS 25
+/*
+ * A recording nobody is out on: this long with neither a fix nor steps to
+ * speak of, and it is finished, for the receiver empties the battery in a
+ * few hours.
+ */
+#define FORGOTTEN_S     600
+#define FORGOTTEN_STEPS 30
 
 enum command {
 	CMD_START,
@@ -85,6 +98,8 @@ static bool have_altitude, altitude_by_air;
 static int32_t altitude_ref_mm;
 static int32_t sea_offset_mm;
 static int sea_fixes;
+static uint32_t stirred_at_s;
+static uint32_t stirred_steps;
 static uint32_t ascent_mm;
 static uint32_t distance_cm;
 static uint32_t laps;
@@ -213,7 +228,7 @@ static void close_file(enum fit_sport sport, uint32_t ascent_m)
 	}
 	gmtime_r(&began, &tm);
 	snprintf(dir, sizeof(dir), ACTIVITY_DIR "/%04d%02d", tm.tm_year + 1900, tm.tm_mon + 1);
-	(void)fs_mkdir(dir);
+	storage_mkdir(dir);
 	snprintf(last_path, sizeof(last_path), "%s/activity_%04d%02d%02dT%02d%02d%02d.fit", dir,
 		 tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
 	ret = fs_rename(RECORDING_PATH, last_path);
@@ -255,11 +270,14 @@ static void start(void)
 	have_point = false;
 	have_altitude = false;
 	sea_fixes = 0;
+	sea_offset_mm = 0;
+	stirred_at_s = 0;
+	stirred_steps = UINT32_MAX;
 	ascent_mm = 0;
 	distance_cm = 0;
 	laps = 0;
 
-	(void)fs_mkdir(ACTIVITY_DIR);
+	storage_mkdir(ACTIVITY_DIR);
 	ret = fit_begin(RECORDING_PATH, fit_time(utc));
 	if (ret == 0) {
 		ret = fit_put(FIT_EVENT, (uint32_t[]){fit_now(), 0, FIT_EVENT_START});
@@ -314,6 +332,23 @@ static void climb(int32_t altitude_mm, bool by_air)
 	}
 }
 
+/* True once there has long been no sign of anyone being out with it. */
+static bool forgotten(bool fix)
+{
+	struct motion_status motion;
+
+	motion_status(&motion);
+	if (stirred_steps == UINT32_MAX) {
+		stirred_steps = motion.steps;
+	}
+	/* Without the step counter there is no telling a still watch indoors. */
+	if (fix || !motion.present || motion.steps - stirred_steps >= FORGOTTEN_STEPS) {
+		stirred_at_s = now.timer_s;
+		stirred_steps = motion.steps;
+	}
+	return now.timer_s - stirred_at_s >= FORGOTTEN_S;
+}
+
 /* A second of recording. */
 static void tick(void)
 {
@@ -351,8 +386,16 @@ static void tick(void)
 			}
 		}
 		if (have_air) {
-			sea_fixes = MIN(sea_fixes + 1, SEA_FIXES);
-			sea_offset_mm += (altitude_mm - air.altitude_mm - sea_offset_mm) / sea_fixes;
+			struct gnss_status receiver;
+
+			gnss_status(&receiver);
+			if (receiver.first_fix_s >= 0 &&
+			    receiver.on_s >= (uint32_t)receiver.first_fix_s + SEA_SETTLE_S &&
+			    receiver.hdop_tenths <= SEA_HDOP_TENTHS) {
+				sea_fixes = MIN(sea_fixes + 1, SEA_FIXES);
+				sea_offset_mm += (altitude_mm - air.altitude_mm - sea_offset_mm) /
+						 sea_fixes;
+			}
 		} else {
 			climb(altitude_mm, false);
 		}
@@ -391,6 +434,12 @@ static void tick(void)
 		}
 	}
 	next_tick_ms += 1000;
+
+	if (forgotten(fresh)) {
+		LOG_INF("no fix and no steps for %d s: finished", FORGOTTEN_S);
+		finish();
+		alert_blip();
+	}
 }
 
 #define DISCARDED_DIR ACTIVITY_DIR "/discarded"
@@ -406,7 +455,7 @@ static void discard(void)
 	if (name == NULL) {
 		return;
 	}
-	(void)fs_mkdir(DISCARDED_DIR);
+	storage_mkdir(DISCARDED_DIR);
 	snprintf(path, sizeof(path), DISCARDED_DIR "%s", name);
 	ret = fs_rename(last_path, path);
 	if (ret < 0) {

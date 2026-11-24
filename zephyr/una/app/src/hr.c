@@ -121,8 +121,8 @@ static K_TIMER_DEFINE(accel_timer, accel_tick, NULL);
 
 /*
  * What the sensor gave and what was made of it, kept on the user volume when
- * asked for ("hr raw on"), in the lines of src/hr_ref.c's files so that
- * scripts/hr-replay reads both.
+ * asked for ("hr raw on") and of every recording (CONFIG_UNA_HR_RAW_RECORDED),
+ * in the lines of src/hr_ref.c's files so that scripts/hr-replay reads both.
  */
 
 static atomic_t raw_wanted;
@@ -160,8 +160,8 @@ static void raw_set(bool on)
 		snprintf(raw_path, sizeof(raw_path), RAW_DIR "/raw-up%u.txt",
 			 k_uptime_get_32() / 1000);
 	}
-	(void)fs_mkdir(STORAGE_ROOT "/Log");
-	(void)fs_mkdir(RAW_DIR);
+	storage_mkdir(STORAGE_ROOT "/Log");
+	storage_mkdir(RAW_DIR);
 	fs_file_t_init(&raw_file);
 	raw_open = fs_open(&raw_file, raw_path, FS_O_CREATE | FS_O_WRITE | FS_O_TRUNC) == 0;
 	if (!raw_open) {
@@ -335,7 +335,9 @@ static void hr_thread(void *p1, void *p2, void *p3)
 		if (want != on) {
 			on = set_power(want);
 		}
-		raw_set(on && atomic_get(&raw_wanted) != 0);
+		raw_set(on && (atomic_get(&raw_wanted) != 0 ||
+			       (IS_ENABLED(CONFIG_UNA_HR_RAW_RECORDED) &&
+				hr_wanted(HR_FOR_RECORD))));
 		if (!on) {
 			k_sem_take(&wake, K_FOREVER);
 			continue;
@@ -387,7 +389,7 @@ static int cmd_hr(const struct shell *sh, size_t argc, char **argv)
 		    s.batches, s.failures);
 	hr_hw_describe(text, sizeof(text));
 	shell_print(sh, "%s", text);
-	if (atomic_get(&raw_wanted) != 0) {
+	if (raw_open) {
 		shell_print(sh, "written to %s", raw_path);
 	}
 	return 0;

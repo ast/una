@@ -438,6 +438,35 @@ static int cmd_usbcycle(const struct shell *sh, size_t argc, char **argv)
 }
 
 /*
+ * What the SoC costs awake and idle, as it is while the GNSS receiver is on:
+ * out of Stop mode for so many seconds, to be read from the telemetry
+ * (stops=0) after that long on battery.
+ */
+static void awake_end(struct k_work *work)
+{
+	ARG_UNUSED(work);
+
+	pm_policy_state_lock_put(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
+	LOG_INF("Stop mode allowed again");
+}
+static K_WORK_DELAYABLE_DEFINE(awake_work, awake_end);
+
+static int cmd_awake(const struct shell *sh, size_t argc, char **argv)
+{
+	int seconds = atoi(argv[1]);
+
+	if (seconds <= 0 || k_work_delayable_is_pending(&awake_work)) {
+		shell_error(sh, "a number of seconds, and one at a time");
+		return -EINVAL;
+	}
+	pm_policy_state_lock_get(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
+	(void)k_work_schedule(&awake_work, K_SECONDS(seconds));
+	LOG_INF("kept out of Stop mode for %d s", seconds);
+	shell_print(sh, "out of Stop mode for %d s", seconds);
+	return 0;
+}
+
+/*
  * With USB off for 3 s: is anything else keeping the SoC out of Stop mode?
  * The console is gone meanwhile, so the answer is kept for "pmdiag show".
  */
@@ -463,6 +492,8 @@ SHELL_STATIC_SUBCMD_SET_CREATE(power_cmds,
 	SHELL_CMD(history, NULL, "Samples of the last hour, one every 5 s", cmd_history),
 	SHELL_CMD(usbcycle, NULL, "Stop USB for 3 s and start it again", cmd_usbcycle),
 	SHELL_CMD(pmdiag, NULL, "Stop USB for 10 s and note Stop-mode locks; \"pmdiag show\" prints them", cmd_pmdiag),
+	SHELL_CMD_ARG(awake, NULL, "Keep out of Stop mode for SECONDS, to measure what that costs",
+		      cmd_awake, 2, 0),
 	SHELL_CMD(off, NULL, "Power the watch off (wake with the power button)", cmd_off),
 	SHELL_SUBCMD_SET_END);
 SHELL_CMD_REGISTER(power, &power_cmds, "Battery, charger, power-off", NULL);

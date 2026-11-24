@@ -475,8 +475,9 @@ static void handle_line(char *text)
 	} else if (strcmp(type, "is_gps_active") == 0) {
 		say("{\"t\":\"gps_power\",\"status\":false}");
 	} else {
+		/* Music, the volume and the like, many a minute: counted, not logged. */
 		status.unknown++;
-		LOG_INF("not understood: type %s", type);
+		LOG_DBG("not understood: type %s", type);
 	}
 }
 

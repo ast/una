@@ -101,7 +101,7 @@ each of them.
 | Barometer, MS5837-02BA | works | on while recording, read once a second (`src/baro_hw.c`): climb, and altitude in the file | floors; what it costs in current is not measured |
 | Accelerometer and gyro, BMI270 | works, not yet tried on a wrist | own driver (`zephyr/una/drivers/sensor/bmi270`, made of Zephyr's): the chip's step counter and activity, read once a minute; a turn of the wrist lights the screen (`src/motion_hw.c`) | steps and wrist turn checked on a wrist; steps kept over a restart, shown on a page and stored per day; cadence; what it costs in current |
 | Magnetometer, BMM350 | works, not yet calibrated or checked against north | own driver (`zephyr/una/drivers/sensor/bmm350`, made of Zephyr's), on while the compass page is shown (`src/compass_hw.c`): heading with the tilt taken out by the accelerometer, calibration by turning the watch | calibration and heading tried on the watch; true north (declination); its interrupt, PC2, is not used |
-| Heart rate, PixArt PAH8316 | works at rest, not yet tried walking or running | own driver (`zephyr/una/drivers/sensor/pah8316`), written from what PixArt's library was seen to do on the bus (`docs/sensors/pah8316-registers.md`) and with nothing of it; a pulse of our own making (`src/hr_alg.c`), within 2 a minute of PixArt's on average at rest; on while its page is shown, while recording (into the file) and while an app listens to the Bluetooth heart rate service | the pulse while walking and running, against a chest strap; what it costs in current; a pulse through the day; SpO2 and HRV, which the chip has settings for |
+| Heart rate, PixArt PAH8316 | works at rest; wrong on a first run (40 to 90 a minute at a run), not yet tried against a strap | own driver (`zephyr/una/drivers/sensor/pah8316`), written from what PixArt's library was seen to do on the bus (`docs/sensors/pah8316-registers.md`) and with nothing of it; a pulse of our own making (`src/hr_alg.c`), within 2 a minute of PixArt's on average at rest; on while its page is shown, while recording (into the file) and while an app listens to the Bluetooth heart rate service | the pulse while walking and running, against a chest strap; what it costs in current; a pulse through the day; SpO2 and HRV, which the chip has settings for |
 
 The USB-C controller has its supply with the watch and is left as it starts.
 
@@ -256,6 +256,11 @@ for three seconds, while a red bar fills; letting go before it is full keeps
 the recording. Discarded files are moved to `/Activity/discarded`, not
 removed.
 
+A recording that is forgotten finishes itself: after ten minutes with
+neither a fix nor thirty steps, for the receiver empties the battery in
+some eight hours (26 to 30 mA while recording, against 0.55 mA idle,
+measured at v0.5.0).
+
 The file is `/Activity/YYYYMM/activity_<start>.fit` on the user volume:
 a record a second (position, distance, speed, altitude), a lap a kilometre
 with a nudge of the motor, and the session. It is written as it is recorded
@@ -263,6 +268,17 @@ with a nudge of the motor, and the session. It is written as it is recorded
 finished at the next start. `una-z runs` copies the files; they open in
 anything that reads FIT. The writer is `src/fit.c`, the recorder
 `src/record.c`; `una-z sh record` shows its state.
+
+The altitude in the file is the barometer's, set right by the receiver's:
+by the mean of what the two differ by over up to ten minutes of fixes,
+leaving out the receiver's first minute and fixes with an HDOP above 2.5,
+when its height is tens of metres off. Until there is such a fix the
+records have no altitude.
+
+While it is recorded, what the heart-rate sensor and the accelerometer
+gave is kept too (`/Log/PPG/raw-<start>.txt`, about 1 MB an hour, `una-z
+ppg` copies it), to work on the pulse with `scripts/hr-replay`:
+`CONFIG_UNA_HR_RAW_RECORDED`, until the pulse of a run is right.
 
 The receiver (Airoha AG3335M on LPUART1, driver in
 `zephyr/una/drivers/gnss/`) is on only while something is recorded, or

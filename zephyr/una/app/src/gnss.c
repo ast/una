@@ -125,8 +125,9 @@ static void on_data(const struct device *dev, const struct gnss_data *data)
 				first = true;
 			}
 		}
-		state.used = data->info.satellites_cnt;
-		state.hdop_tenths = data->info.hdop / 100;
+		/* Without a fix the receiver leaves these as they last were. */
+		state.used = valid ? data->info.satellites_cnt : 0;
+		state.hdop_tenths = valid ? data->info.hdop / 100 : 0;
 	}
 	if (first) {
 		LOG_INF("first fix after %d s: %lld %lld nanodegrees, %d mm", state.first_fix_s,

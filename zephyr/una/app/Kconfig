@@ -14,6 +14,16 @@ config UNA_BNRG_FW
 	  BlueNRG_2N_FW_V3_4_0.bin from fw_images/ in ST's STSW-BNRG2N, by its
 	  path from the application's folder or in full.
 
+config UNA_HR_RAW_RECORDED
+	bool "Keep the heart-rate sensor's samples of every recording"
+	default y
+	help
+	  While an activity is recorded, what the sensor and the accelerometer
+	  gave is written to /USER:/Log/PPG/ as "hr raw on" writes it, about
+	  1 MB an hour, for scripts/hr-replay: the pulse while running is not
+	  right yet, and this is what there is to work on it with. To be turned
+	  off when it is.
+
 config UNA_PIXART_REF
 	bool "PixArt's closed library on the heart-rate sensor, with the bus traced"
 	depends on BOARD_UNA_WATCH && FPU && FP_HARDABI
