@@ -43,7 +43,15 @@ struct ag3335m_data {
 
 	struct modem_pipe *uart_pipe;
 	struct modem_backend_uart uart_backend;
-	uint8_t uart_backend_receive_buf[2048];
+	/*
+	 * The backend takes what comes into one half of this while the other
+	 * is read, and changes over 20 ms after the first byte or when the half
+	 * is nearly full. A second's sentences come at once, 92 bytes a
+	 * millisecond: with many satellites the ones that list them are more
+	 * than the 1024 a half once was, and all of the half was lost when
+	 * the change did not come within the millisecond.
+	 */
+	uint8_t uart_backend_receive_buf[16384];
 	uint8_t uart_backend_transmit_buf[64];
 
 	struct modem_chat chat;

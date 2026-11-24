@@ -259,7 +259,9 @@ removed.
 A recording that is forgotten finishes itself: after ten minutes with
 neither a fix nor thirty steps, for the receiver empties the battery in
 some eight hours (26 to 30 mA while recording, against 0.55 mA idle,
-measured at v0.5.0).
+measured at v0.5.0). Some 9 mA of that is the SoC, kept out of Stop mode
+for the receiver's UART (`una-z sh power awake SECONDS` does the same
+without the receiver, to measure it).
 
 The file is `/Activity/YYYYMM/activity_<start>.fit` on the user volume:
 a record a second (position, distance, speed, altitude), a lap a kilometre
