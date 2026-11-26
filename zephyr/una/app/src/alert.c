@@ -71,8 +71,12 @@ static void play_step(struct k_work *work)
 	step = (step + 1) % ARRAY_SIZE(pattern);
 }
 
+/* Whether what was last asked for is the ring that the ring screen shows. */
+static atomic_t ringing;
+
 static void start(int steps)
 {
+	atomic_set(&ringing, 0);
 	atomic_set(&asked, steps);
 	k_work_reschedule(&step_work, K_NO_WAIT);
 }
@@ -109,9 +113,19 @@ static bool ring_key(enum ui_key key, bool held)
 	ARG_UNUSED(key);
 	ARG_UNUSED(held);
 
-	alert_stop();
 	ui_pop();
 	return true;
+}
+
+/*
+ * Leaving is what silences it, so that holding BACK, which the screen does
+ * not see, does too. A blip that has come since is left alone.
+ */
+static void ring_leave(void)
+{
+	if (atomic_get(&ringing)) {
+		alert_stop();
+	}
 }
 
 static const struct ui_screen ring_screen = {
@@ -119,6 +133,7 @@ static const struct ui_screen ring_screen = {
 	.enter = ring_enter,
 	.update = ring_update,
 	.key = ring_key,
+	.leave = ring_leave,
 };
 
 void alert_ring(const char *title, int seconds)
@@ -133,6 +148,7 @@ void alert_ring(const char *title, int seconds)
 		ring_time[0] = '\0';
 	}
 	start(seconds * 1000 / PATTERN_MS * ARRAY_SIZE(pattern));
+	atomic_set(&ringing, 1);
 	ui_show(&ring_screen);
 }
 

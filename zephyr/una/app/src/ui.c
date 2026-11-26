@@ -231,6 +231,11 @@ void ui_home(void)
 static void default_key(enum ui_key key, bool held)
 {
 	if (held) {
+		/*
+		 * Held UP and DOWN on a page of the ring are kept for later: going
+		 * to the recorder, a lap, locking the buttons, a torch. Inside a
+		 * page they are the page's.
+		 */
 		return;
 	}
 	if (key == UI_KEY_BACK) {

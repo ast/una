@@ -220,14 +220,22 @@ DOWN from the face goes through the ring in this order, UP the other way:
 
 | Page | SELECT | SELECT held |
 |---|---|---|
-| Face | go in: choose the face | the same |
+| Face | | go in: choose the face |
 | Record | start, pause, resume | finish |
 | Messages | go in: the ones before the latest | |
+| Pulse | | |
+| Compass | start, stop the calibration | |
 | Stopwatch | start, stop | reset |
 | Timer | start, stop | go in: set the minutes |
 | Alarm | on, off | go in: set hour, then minute |
 | Settings | go in: the list; then change the row | on "power off": power off |
 | Systems | go in: a page per subsystem | the same |
+
+A short press of SELECT on the face does nothing, so that a slip does not
+change it. Holding UP or DOWN on a page of the ring does nothing yet and is
+kept for later. Holding SELECT is not power-off, which is a row in the
+settings; held for some 20 s it is the power chip's own reset (When the app does not come up).
+Holding BACK also silences what rings.
 
 Inside, UP and DOWN change the value or move to the next row or page, and
 what can be changed is cyan. There are no questions to confirm: what would
@@ -445,8 +453,8 @@ Text from the phone is shown in fonts that have Latin-1 besides ASCII (made by
 
 ## Watch faces
 
-SELECT on the face opens a chooser that shows each face; UP and DOWN go
-through them and SELECT turns an analogue dial white or black. From the shell:
+Holding SELECT on the face opens a chooser that shows each face; UP and DOWN
+go through them and SELECT turns an analogue dial white or black. From the shell:
 `una-z sh face 3 1` (face 0-4, white 0 or 1).
 
 | Face | After | Battery shown as |

@@ -23,7 +23,8 @@ enum ui_key {
  * does what the page does, or goes in; held, it goes in to change what the
  * page is set to. BACK goes out one level and, from a page in the ring, to
  * the watch face. Holding BACK returns to the face from anywhere and is not
- * passed on.
+ * passed on. Holding UP or DOWN on a page of the ring does nothing yet and is
+ * kept for later; a page does not take them there.
  */
 struct ui_screen {
 	const char *name;

@@ -144,15 +144,18 @@ static uint32_t face_update(void)
 	return set ? (60 - now.tm_sec) * 1000 : 60000;
 }
 
-/* Going in is choosing the face. */
+/*
+ * Going in is choosing the face, and is asked for by holding: a slip on
+ * SELECT, the button most in the way, does not then change the face.
+ */
 static bool face_key(enum ui_key key, bool held)
 {
-	ARG_UNUSED(held);
-
 	if (key != UI_KEY_SELECT) {
 		return false;
 	}
-	ui_push(&face_chooser_screen);
+	if (held) {
+		ui_push(&face_chooser_screen);
+	}
 	return true;
 }
 
