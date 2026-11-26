@@ -221,7 +221,7 @@ DOWN from the face goes through the ring in this order, UP the other way:
 | Page | SELECT | SELECT held |
 |---|---|---|
 | Face | | go in: choose the face |
-| Record | start, pause, resume | finish |
+| Record | start, resume | pause; paused: finish |
 | Messages | go in: the ones before the latest | |
 | Pulse | | |
 | Compass | start, stop the calibration | |
@@ -253,10 +253,11 @@ off or not known. They are drawn in `src/systems.c` with the helpers of
 ## Recording
 
 SELECT on the Record page starts at once; the clock runs while the receiver
-looks for its first fix. A short press only ever pauses and resumes, so a
-recording is not ended or lost by a slip; holding SELECT finishes it and
-shows the summary with a guess of what it was (by the average speed), which
-UP and DOWN change. The other pages stay within reach while recording, and
+looks for its first fix. While it runs a short press does nothing, so a
+recording is neither paused nor ended by a slip: holding SELECT pauses it,
+a short press then resumes, and holding once more finishes it and shows the
+summary with a guess of what it was (by the average speed), which UP and
+DOWN change. The other pages stay within reach while recording, and
 BACK leads to the recording instead of the face.
 
 A recording made by mistake is discarded from the summary by holding SELECT

@@ -1,6 +1,7 @@
 /*
  * The recorder's page, and the summary shown when a recording is finished.
- * SELECT starts, pauses and resumes; held, it finishes.
+ * SELECT starts and resumes; held, it pauses and, once paused, finishes: a
+ * slip neither stops the clock nor ends the recording.
  */
 
 #include <stdio.h>
@@ -137,6 +138,8 @@ static void paint_record(void)
 		draw_text(0, 82, "NOT SAVED", SMALL, DRAW_AMBER, DRAW_CENTRE);
 	} else if (!running) {
 		draw_text(0, 82, "hold: finish", SMALL, DRAW_DIM, DRAW_CENTRE);
+	} else {
+		draw_text(0, 82, "hold: pause", SMALL, DRAW_DIM, DRAW_CENTRE);
 	}
 }
 
@@ -300,15 +303,18 @@ static bool record_key(enum ui_key key, bool held)
 		return false;
 	}
 	record_get(&state);
-	if (held) {
-		if (state.phase != RECORD_IDLE) {
-			record_finish();
-			ui_push(&summary_screen);
+	if (state.phase == RECORD_IDLE) {
+		if (!held) {
+			record_start();
 		}
-	} else if (state.phase == RECORD_IDLE) {
-		record_start();
 	} else if (state.phase == RECORD_RUNNING) {
-		record_pause();
+		/* Not by a short press: a sleeve or the back of a hand gives those. */
+		if (held) {
+			record_pause();
+		}
+	} else if (held) {
+		record_finish();
+		ui_push(&summary_screen);
 	} else {
 		record_resume();
 	}
