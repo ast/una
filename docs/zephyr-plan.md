@@ -396,6 +396,11 @@ but it is a real piece of work and is not started.
 ### 7. Utilities
 Alarm, timer, stopwatch, compass with calibration, sleep-mode schedule.
 
+Authenticator codes (26 Nov 2026): TOTP with its own SHA-1 and HMAC in
+`src/totp.c`, the secrets added with `totp add` over the cable and kept in
+the settings (`totp/table`), a page in the ring. Checked on the simulator
+against RFC 6238's vectors.
+
 ### 8. Loadable apps (later)
 Enable LLEXT, export the app C API and LVGL, load `.llext` files from
 `Apps/` on the eMMC, and move one built-in app out as the proof.

@@ -114,5 +114,6 @@ extern const struct ui_screen systems_screen;
 extern const struct ui_screen stopwatch_screen;
 extern const struct ui_screen timer_screen;
 extern const struct ui_screen alarm_screen;
+extern const struct ui_screen codes_screen;
 
 #endif

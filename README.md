@@ -54,8 +54,9 @@ simulator, smpmgr for firmware upload, plus openocd, probe-rs, tio and clangd.
 - Five watch faces: a digital one and four analogue dials, white or black
   (below). Each shows the date, the battery and the alarm time.
 - One ring of pages, no menu: face, recorder, messages, compass, stopwatch, countdown
-  timer, one daily alarm, settings (backlight time, wrist light, sound, vibration,
-  Bluetooth, power off) and systems. Timer and alarm ring with the buzzer and the vibration motor.
+  timer, one daily alarm, authenticator codes, settings (backlight time, wrist light,
+  sound, vibration, Bluetooth, power off) and systems. Timer and alarm ring with the
+  buzzer and the vibration motor.
 - One recorder for every activity: it keeps time, distance, pace and climb
   and writes a FIT file as it goes; whether it was a walk, run, ride or hike
   is a label on the summary. The GPS receiver gets its first fix in about a
@@ -157,6 +158,7 @@ una-z log 10                                # watch log messages for 10 s
 una-z logs                                  # copy the log files off the eMMC -> logs/
 una-z runs                                  # copy the recorded activities -> runs/
 una-z time                                  # set the watch's clock from this computer
+una-z totp add github                       # an authenticator code; asks for the secret (Codes)
 una-z reset                                 # reboot through mcumgr
 ```
 
@@ -228,6 +230,7 @@ DOWN from the face goes through the ring in this order, UP the other way:
 | Stopwatch | start, stop | reset |
 | Timer | start, stop | go in: set the minutes |
 | Alarm | on, off | go in: set hour, then minute |
+| Codes | go in: the codes, one at a time | |
 | Settings | go in: the list; then change the row | on "power off": power off |
 | Systems | go in: a page per subsystem | the same |
 
@@ -451,6 +454,39 @@ information services, open to any app.
 
 Text from the phone is shown in fonts that have Latin-1 besides ASCII (made by
 `scripts/una-fonts`); a character beyond that is a question mark.
+
+## Codes
+
+The Codes page shows the six-digit codes an authenticator app shows (TOTP as
+Google Authenticator makes it: SHA-1, six digits, thirty seconds), for up to
+eight accounts. SELECT goes in; UP and DOWN go from one account to the next.
+The ring along the edge starts at twelve when a code becomes valid and closes
+as it runs out, amber for the last five seconds. A code left on the screen
+goes back to the page by itself after a minute, since it costs a frame a
+second.
+
+The secrets are not in this repository or in the image. They are added over
+the cable and kept in the settings in internal flash:
+
+```sh
+una-z totp add github      # asks for the secret: base32, or an otpauth:// URI
+una-z totp import          # asks for an otpauth-migration:// URI
+una-z totp list
+una-z totp code github     # the code now, to compare with the phone's
+una-z totp del github
+```
+
+The secret is asked for, or read from a pipe, and not given as an argument,
+so it is not left in the computer's shell history. `totp import` takes what
+Google Authenticator's "Transfer accounts" QR code holds (`zbarimg` reads it
+from a screenshot or a photo) and adds every account in it; names are cut to
+twelve characters.
+
+There is no PIN and the secrets are not encrypted: whoever has the watch and
+a cable has the shell, and with it the flash. The watch never prints or logs
+a secret itself, and there is no way to them over Bluetooth. A code is only
+right when the clock is, within some thirty seconds: `una-z time` sets it,
+and so does the phone each time it connects.
 
 ## Watch faces
 

@@ -18,18 +18,25 @@
   una-z ppg [DIR]            copy what was written of the heart-rate sensor
                              (/Log/PPG on the eMMC) to DIR (default: logs/ppg/)
   una-z time                 set the watch's clock and UTC offset from this computer
+  una-z totp add NAME        add an authenticator code; asks for the secret (base32,
+                             or an otpauth:// URI), or reads it from a pipe
+  una-z totp import          add the accounts of an otpauth-migration:// URI, which
+                             is what Google Authenticator's "Transfer accounts"
+                             QR code holds; asks for it, or reads it from a pipe
+  una-z totp list | del NAME | code NAME
   una-z wait                 wait until the shell answers
   una-z reset                reboot through mcumgr (works when the shell is stuck)
 
   una-z sim [--window]       start the simulator (build/sim, see the README), again
                              if it is running; --window shows its screen
   una-z sim stop
-  una-z -s COMMAND...        sh, shot, press, log, runs, time and wait, on the
-                             simulator
+  una-z -s COMMAND...        sh, shot, press, log, runs, time, totp and wait, on
+                             the simulator
 
 The first USB serial port is the shell, the second is mcumgr.
 """
 import base64
+import getpass
 import glob
 import os
 import re
@@ -39,6 +46,7 @@ import subprocess
 import sys
 import termios
 import time
+import urllib.parse
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROMPT = "una:~$ "
@@ -312,6 +320,119 @@ def set_time():
     print(shell(f"clock set {int(time.time())} {offset_min}"))
 
 
+def secret_input(prompt):
+    """A secret typed without echo, or the first line of a pipe: not an argument,
+    which the shell's history and the process list would keep."""
+    if sys.stdin.isatty():
+        return getpass.getpass(prompt).strip()
+    return sys.stdin.readline().strip()
+
+
+def totp_send(name, secret):
+    """Add one to the watch. What the watch says, which is nothing if it went well."""
+    try:
+        return shell(f"totp add {name} {secret}")
+    except TimeoutError:
+        # Not the error's own text: the secret is in it.
+        raise TimeoutError("no answer from the watch to totp add") from None
+
+
+def totp_add(name):
+    given = secret_input(f"Secret for {name} (base32 or otpauth://): ")
+    if given.lower().startswith("otpauth://"):
+        uri = urllib.parse.urlsplit(given)
+        query = {k.lower(): v[0] for k, v in urllib.parse.parse_qs(uri.query).items()}
+        wants = (uri.netloc.lower(), query.get("algorithm", "SHA1").upper(),
+                 query.get("digits", "6"), query.get("period", "30"))
+        if wants != ("totp", "SHA1", "6", "30"):
+            sys.exit("the watch makes TOTP codes with SHA1, 6 digits and 30 seconds; this asks for "
+                     + " ".join(wants))
+        given = query.get("secret", "")
+    secret = re.sub(r"[\s=-]", "", given).upper()
+    if not re.fullmatch(r"[A-Z2-7]+", secret):
+        sys.exit("not a secret: base32 is of the letters A-Z and the digits 2-7")
+    said = totp_send(name, secret)
+    if said:
+        sys.exit(said)
+    print(f"added {name}")
+
+
+def protobuf(data):
+    """The fields of a protobuf message: (number, value), a value an int or bytes."""
+    def varint(at):
+        value = shift = 0
+        while True:
+            value |= (data[at] & 0x7f) << shift
+            shift += 7
+            at += 1
+            if not data[at - 1] & 0x80:
+                return value, at
+
+    at = 0
+    while at < len(data):
+        key, at = varint(at)
+        if key & 7 == 0:
+            value, at = varint(at)
+        elif key & 7 == 2:
+            size, at = varint(at)
+            if at + size > len(data):
+                raise IndexError
+            value, at = data[at:at + size], at + size
+        else:
+            raise ValueError(f"wire type {key & 7}")
+        yield key >> 3, value
+
+
+def totp_import():
+    given = secret_input("otpauth-migration:// URI: ")
+    uri = urllib.parse.urlsplit(given)
+    data = urllib.parse.parse_qs(uri.query).get("data")
+    if uri.scheme != "otpauth-migration" or not data:
+        sys.exit("not an otpauth-migration://offline?data=... URI")
+    try:
+        # parse_qs has made the base64's plus signs into spaces.
+        payload = base64.b64decode(data[0].replace(" ", "+"), validate=True)
+        accounts = [dict(protobuf(v)) for n, v in protobuf(payload) if n == 1]
+    except (ValueError, IndexError):
+        sys.exit("the URI's data is not what Google Authenticator makes")
+    taken = set(shell("totp list").split())
+    failed = False
+    for account in accounts:
+        # 1 secret, 2 name, 3 issuer, 4 algorithm (1 SHA1), 5 digits (1 six), 6 type (2 TOTP)
+        label = account.get(3) or account.get(2) or b"code"
+        label = label.decode("utf-8", "replace")
+        if (account.get(4, 1), account.get(5, 1), account.get(6, 2)) != (1, 1, 2):
+            print(f"{label}: not TOTP with SHA1 and 6 digits, left out")
+            failed = True
+            continue
+        base = re.sub(r"[^!-~]", "", label)[:12] or "code"
+        name, n = base, 2
+        while name in taken:
+            name, n = base[:12 - len(str(n))] + str(n), n + 1
+        said = totp_send(name, base64.b32encode(account.get(1, b"")).decode().rstrip("="))
+        if said:
+            print(f"{label}: {said}")
+            failed = True
+            continue
+        taken.add(name)
+        print(f"added {name}" + ("" if name == label else f" ({label})"))
+    if failed:
+        sys.exit(1)
+
+
+def totp(rest):
+    if len(rest) == 2 and rest[0] == "add":
+        totp_add(rest[1])
+    elif rest == ["import"]:
+        totp_import()
+    elif rest == ["list"] or (len(rest) == 2 and rest[0] in ("del", "code")):
+        said = shell("totp " + " ".join(rest))
+        if said:
+            print(said)
+    else:
+        sys.exit(__doc__)
+
+
 def main():
     global SIM
     args = sys.argv[1:]
@@ -329,7 +450,7 @@ def main():
         else:
             sys.exit(__doc__)
         return
-    if SIM and cmd not in ("sh", "shot", "press", "log", "runs", "time", "wait"):
+    if SIM and cmd not in ("sh", "shot", "press", "log", "runs", "time", "totp", "wait"):
         sys.exit(f"{cmd}: not on the simulator")
     try:
         if cmd == "sh":
@@ -358,6 +479,8 @@ def main():
             logs(rest[0] if rest else os.path.join(ROOT, "logs"))
         elif cmd == "time":
             set_time()
+        elif cmd == "totp":
+            totp(rest)
         elif cmd == "wait":
             print(wait())
         else:

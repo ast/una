@@ -33,6 +33,8 @@ target_sources(app PRIVATE
   src/stopwatch.c
   src/systems.c
   src/timer.c
+  src/totp.c
+  src/totp_page.c
   src/ui.c
 )
 
